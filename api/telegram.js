@@ -37,13 +37,15 @@ async function handleMention(message, senderName, today, nowTime) {
 
 Single actions — respond with:
 {
-  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "show_food" | "show_schedule",
+  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity",
   "reply": "...",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
     // add_schedule: { "time": "HH:MM", "activity": "..." }
     // add_reminder: { "time": "HH:MM", "message": "..." }
     // add_routine: { "time": "HH:MM", "activity": "..." }
+    // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
+    // show_activity: { "date_ref": "today" | "yesterday" }
     // others: {}
   }
 }
@@ -98,17 +100,25 @@ async function parseMessageWithAI(message, photoCaption) {
 Message: "${content}"
 
 Determine if it is:
-- A LOG ENTRY reporting something Johnson did (food, vitamin, schedule)
-- A QUESTION asking about what Johnson did (query_food, query_vitamins, query_schedule)
-- UNRELATED (none) — e.g. general chat not about Johnson's care
+- A LOG ENTRY reporting something Johnson did:
+  - food: eating, drinking, snacking
+  - vitamin: taking a vitamin or supplement
+  - schedule: a specific appointment or event
+  - activity: anything else Johnson did (bath, brushing teeth, playing, sleeping, reading, going out, etc.)
+- A QUESTION asking about what Johnson did (query_food, query_vitamins, query_schedule, query_activity)
+- UNRELATED (none) — general chat not about Johnson's care
+
+For query_activity, extract the date reference from the message.
 
 Respond ONLY with valid JSON (no markdown):
 {
-  "type": "food" | "vitamin" | "schedule" | "query_food" | "query_vitamins" | "query_schedule" | "none",
+  "type": "food" | "vitamin" | "schedule" | "activity" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "none",
   "data": {
     // food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
     // vitamin: { "name": "...", "time": "HH:MM or null" }
     // schedule: { "activity": "...", "time": "HH:MM" }
+    // activity: { "activity": "...", "time": "HH:MM or null", "notes": "..." }
+    // query_activity: { "date_ref": "today" | "yesterday" }
     // query_*: {}
     // none: {}
   },
@@ -292,6 +302,32 @@ export default async function handler(req, res) {
       return res.status(200).send('OK');
     }
 
+    if (action.type === 'add_activity' && action.data?.activity) {
+      await supabase.from('activity_logs').insert({
+        date: today,
+        time: action.data.time || nowTime,
+        activity: action.data.activity,
+        notes: action.data.notes || '',
+        source: 'telegram'
+      });
+    }
+
+    if (action.type === 'show_activity') {
+      const dateRef = action.data?.date_ref || 'today';
+      const queryDate = dateRef === 'yesterday'
+        ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+        : today;
+      const { data: acts } = await supabase
+        .from('activity_logs').select('*').eq('date', queryDate).order('time');
+      if (!acts?.length) {
+        await sendTelegram(chatId, `No activities logged for Johnson on ${queryDate}! 📋`);
+      } else {
+        const list = acts.map(a => `• ${a.time || '?'} — ${a.activity}${a.notes ? ' (' + a.notes + ')' : ''}`).join('\n');
+        await sendTelegram(chatId, `📋 *Johnson's activities on ${queryDate}:*\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+
     if (action.type === 'show_schedule') {
       const [{ data: sched }, { data: routine }] = await Promise.all([
         supabase.from('schedule').select('*').eq('date', today).order('time'),
@@ -351,6 +387,17 @@ export default async function handler(req, res) {
     if (parsed.confirmation) await sendTelegram(chatId, `📅 ${parsed.confirmation}`);
   }
 
+  else if (parsed.type === 'activity' && parsed.data?.activity) {
+    await supabase.from('activity_logs').insert({
+      date: today,
+      time: parsed.data.time || nowTime,
+      activity: parsed.data.activity,
+      notes: parsed.data.notes || '',
+      source: 'telegram'
+    });
+    if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
+  }
+
   else if (parsed.type === 'query_food') {
     const { data: foods } = await supabase
       .from('food_logs').select('*').eq('date', today).order('time');
@@ -373,6 +420,21 @@ export default async function handler(req, res) {
     } else {
       const list = vits.map(v => `✅ ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n');
       await sendTelegram(chatId, `💊 *Johnson's vitamins today:*\n\n${list}`);
+    }
+  }
+
+  else if (parsed.type === 'query_activity') {
+    const dateRef = parsed.data?.date_ref || 'today';
+    const queryDate = dateRef === 'yesterday'
+      ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      : today;
+    const { data: acts } = await supabase
+      .from('activity_logs').select('*').eq('date', queryDate).order('time');
+    if (!acts?.length) {
+      await sendTelegram(chatId, `No activities logged for Johnson on ${queryDate}!`);
+    } else {
+      const list = acts.map(a => `• ${a.time || '?'} — ${a.activity}${a.notes ? ' (' + a.notes + ')' : ''}`).join('\n');
+      await sendTelegram(chatId, `📋 *Johnson's activities on ${queryDate}:*\n\n${list}`);
     }
   }
 

@@ -136,6 +136,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('mealplan',this)">Meal Plan</button>
     <button class="nav-btn" onclick="switchTab('ai',this)">🤖 AI</button>
     <button class="nav-btn" onclick="switchTab('routine',this)">Routine</button>
+    <button class="nav-btn" onclick="switchTab('activity',this)">Activity Log</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
     <button class="nav-btn" onclick="switchTab('insights',this)">💡 Insights</button>
@@ -309,6 +310,32 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
   </div>
 
+  <!-- ACTIVITY LOG -->
+  <div id="tab-activity" class="section">
+    <div class="card">
+      <div class="card-title">Log an activity</div>
+      <div class="input-row">
+        <input type="time" id="act-time">
+        <input type="text" id="act-name" placeholder="Activity (e.g. Bath, Brushed teeth, Playground)" style="flex:2">
+      </div>
+      <div class="input-row">
+        <input type="text" id="act-notes" placeholder="Notes (optional)" style="flex:1">
+      </div>
+      <button class="btn btn-primary" onclick="addActivity()">Log activity</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Browse by date</div>
+      <div class="input-row">
+        <input type="date" id="act-date" style="flex:1">
+        <button class="btn" onclick="loadActivities()">Load</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" id="act-date-label">Today's activities</div>
+      <div id="act-log"><div class="empty-state">No activities logged yet</div></div>
+    </div>
+  </div>
+
   <!-- FOOD GUIDE -->
   <div id="tab-foodguide" class="section">
     <div class="card">
@@ -396,6 +423,12 @@ document.getElementById('today-date').textContent = now.toLocaleDateString('en-U
 document.getElementById('food-date-label').textContent = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
 const h = String(now.getHours()).padStart(2,'0'), m = String(now.getMinutes()).padStart(2,'0');
 document.getElementById('food-time').value = h+':'+m;
+document.addEventListener('DOMContentLoaded', () => {
+  const actDate = document.getElementById('act-date');
+  if(actDate) actDate.value = todayKey;
+  const actTime = document.getElementById('act-time');
+  if(actTime) actTime.value = h+':'+m;
+});
 
 function switchTab(tab, btn) {
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -409,6 +442,7 @@ function switchTab(tab, btn) {
   if(tab==='reminders') loadReminders();
   if(tab==='mealplan') loadMealPlan();
   if(tab==='routine') loadRoutine();
+  if(tab==='activity') loadActivities();
   if(tab==='ai') {}
   if(tab==='insights') loadInsights();
 }
@@ -845,6 +879,43 @@ async function toggleRoutine(id,active) {
 async function deleteRoutine(id) {
   await sb.from('master_schedule').delete().eq('id',id);
   loadRoutine();
+}
+
+// ── ACTIVITY LOG ──
+async function loadActivities() {
+  const dateInput = document.getElementById('act-date');
+  const d = dateInput?.value || todayKey;
+  const label = document.getElementById('act-date-label');
+  if(label) label.textContent = d === todayKey ? "Today's activities" : `Activities on ${d}`;
+  const {data} = await sb.from('activity_logs').select('*').eq('date', d).order('time');
+  const el = document.getElementById('act-log');
+  if(!data?.length){el.innerHTML='<div class="empty-state">No activities logged for this day</div>';return;}
+  el.innerHTML = data.map(a=>`<div class="log-item">
+    <span class="log-time">${a.time||''}</span>
+    <div style="flex:1">
+      <div class="log-name">${a.activity}${a.source==='telegram'?'<span class="badge badge-tg" style="margin-left:6px">via Telegram</span>':''}</div>
+      ${a.notes?`<div class="log-sub">${a.notes}</div>`:''}
+    </div>
+    <div class="log-actions"><button class="btn btn-sm btn-danger" onclick="deleteActivity('${a.id}')">Remove</button></div>
+  </div>`).join('');
+}
+
+async function addActivity() {
+  const t = document.getElementById('act-time').value;
+  const n = document.getElementById('act-name').value.trim();
+  const no = document.getElementById('act-notes').value.trim();
+  if(!n) return;
+  const dateInput = document.getElementById('act-date');
+  const d = dateInput?.value || todayKey;
+  await sb.from('activity_logs').insert({date:d, time:t||new Date().toTimeString().slice(0,5), activity:n, notes:no, source:'app'});
+  document.getElementById('act-name').value='';
+  document.getElementById('act-notes').value='';
+  loadActivities();
+}
+
+async function deleteActivity(id) {
+  await sb.from('activity_logs').delete().eq('id',id);
+  loadActivities();
 }
 
 // ── INSIGHTS ──

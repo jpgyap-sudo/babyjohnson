@@ -35,6 +35,16 @@ export default async function handler(req, res) {
       : "Nothing logged for Johnson today yet!";
     return res.status(200).json({ type: 'show_food', reply });
   }
+  if (isQuery && /\b(activity|activities|do|did|done)\b/.test(msgLower)) {
+    const queryDate = /\byesterday\b/.test(msgLower)
+      ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      : today;
+    const { data: acts } = await supabase.from('activity_logs').select('*').eq('date', queryDate).order('time');
+    const reply = acts?.length
+      ? `📋 Johnson's activities on ${queryDate}:\n\n${acts.map(a => `• ${a.time || '?'} — ${a.activity}${a.notes ? ' (' + a.notes + ')' : ''}`).join('\n')}`
+      : `No activities logged for Johnson on ${queryDate}!`;
+    return res.status(200).json({ type: 'show_activity', reply });
+  }
   if (isQuery && /\b(vitamin|vitamins|supplement)\b/.test(msgLower)) {
     const { data: vits } = await supabase.from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
     const reply = vits?.length
@@ -57,7 +67,7 @@ export default async function handler(req, res) {
 
 Single action:
 {
-  "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "show_schedule" | "show_food" | "show_vitamins" | "show_routine" | "chat",
+  "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_schedule" | "show_food" | "show_vitamins" | "show_routine" | "show_activity" | "chat",
   "reply": "Short friendly confirmation or answer",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
@@ -65,6 +75,8 @@ Single action:
     // add_schedule: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // add_reminder: { "time": "HH:MM", "message": "..." }
     // add_routine: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
+    // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
+    // show_activity: { "date_ref": "today" | "yesterday" }
     // show_*: {}
     // chat: {}
   }
@@ -88,6 +100,8 @@ Rules:
 - Use show_routine when asked about the master/daily routine
 - Use show_food when asked what Johnson ate today
 - Use show_vitamins when asked about vitamins today
+- Use add_activity for any action Johnson did (bath, brushing teeth, playing, sleeping, etc.)
+- Use show_activity when asked what Johnson did or his activities
 - Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: message }]
     })
@@ -160,6 +174,24 @@ Rules:
       time: parsed.data.time, activity: parsed.data.activity,
       color: parsed.data.color || '#7F77DD', active: true
     });
+  }
+
+  if (parsed.type === 'add_activity' && parsed.data?.activity) {
+    await supabase.from('activity_logs').insert({
+      date: today, time: parsed.data.time || nowTime,
+      activity: parsed.data.activity, notes: parsed.data.notes || '', source: 'app'
+    });
+  }
+
+  if (parsed.type === 'show_activity') {
+    const queryDate = parsed.data?.date_ref === 'yesterday'
+      ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      : today;
+    const { data: acts } = await supabase.from('activity_logs').select('*').eq('date', queryDate).order('time');
+    const reply = acts?.length
+      ? `📋 Johnson's activities on ${queryDate}:\n\n${acts.map(a => `• ${a.time || '?'} — ${a.activity}${a.notes ? ' (' + a.notes + ')' : ''}`).join('\n')}`
+      : `No activities logged for Johnson on ${queryDate}!`;
+    return res.status(200).json({ type: 'show_activity', reply });
   }
 
   if (parsed.type === 'show_schedule') {
