@@ -12,8 +12,9 @@ This app helps parents and caregivers track Baby Johnson's daily care (2 years o
 Handles direct messages from the web app UI. Understands natural language and maps them to care log actions or answers.
 
 ### Telegram Bot (`/api/telegram`)
-Lives in the family Telegram group. Works in two modes:
+Lives in the family Telegram group. Works in three modes:
 
+- **Dashboard mode** — Type `/dashboard` to get a button grid. One tap starts a smart logging flow — no typing needed for most actions.
 - **@mention mode** — Tag the bot directly to ask questions, log anything, or get a general answer on any topic.
 - **Passive mode** — The bot silently reads group messages and auto-logs anything care-related (food, vitamins, activities, etc.) without needing to be tagged.
 
@@ -114,6 +115,46 @@ The agent builds a running profile of Johnson over time using `johnson_profile`.
 
 ## Timezone
 All times use **Philippine time (PHT, UTC+8)**.
+
+---
+
+## Caregiver Interaction Behavior
+
+The agent makes logging as easy as possible for caregivers — especially yaya and grandparents who prefer tapping over typing.
+
+**Principles:**
+- Prefer buttons over text input wherever possible.
+- Ask only **one question at a time** — never stack multiple questions.
+- Keep every reply short. Caregivers are busy.
+- Always confirm after saving a log (one line is enough).
+- If a caregiver's reply is unclear, ask one short follow-up question.
+- Use the **button-tap time**, not the reply time, when logging an event.
+- Remember patterns from repeated logs over time.
+
+**Example — Eating flow:**
+```
+Caregiver taps: 🍽 Eating
+Bot: What is Johnson eating?
+Caregiver: banana rice chicken
+Bot: ✅ Logged: Johnson ate banana rice chicken at 12:42 PM
+     How much did he eat?
+     [😋 All]  [🍽 Half]  [🥄 Few bites]  [🙅 Refused]
+Caregiver taps: 😋 All
+Bot: ✅ Updated — Johnson ate All
+```
+
+**Example — Sleep tracking:**
+```
+Caregiver taps: 😴 Sleeping
+Bot: Is this a nap or bedtime?
+     [💤 Nap]  [🌙 Bedtime]
+Caregiver taps: 💤 Nap
+Bot: 💤 Johnson started nap at 13:05. I'll track the duration.
+     [☀️ Johnson is awake!]
+... later ...
+Caregiver taps: ☀️ Johnson is awake!
+Bot: ☀️ Johnson is awake! Nap duration: 1h 23m ✅
+```
 
 ---
 

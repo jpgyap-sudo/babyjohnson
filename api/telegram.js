@@ -30,6 +30,421 @@ async function sendWithButtons(chatId, text, inlineKeyboard) {
   });
 }
 
+async function answerCallback(callbackId, text) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackId, text })
+  });
+}
+
+async function editMessage(chatId, messageId, text) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown' })
+  });
+}
+
+// === DASHBOARD — conversation state helpers ===
+
+async function setConversationState(userId, state) {
+  await supabase.from('conversation_state').upsert(
+    { telegram_user_id: userId, ...state },
+    { onConflict: 'telegram_user_id' }
+  );
+}
+
+async function getConversationState(userId) {
+  const { data } = await supabase
+    .from('conversation_state')
+    .select('*')
+    .eq('telegram_user_id', userId)
+    .maybeSingle();
+  return data;
+}
+
+async function clearConversationState(userId) {
+  await supabase.from('conversation_state').delete().eq('telegram_user_id', userId);
+}
+
+// === DASHBOARD — main button grid ===
+
+async function sendDashboard(chatId) {
+  await sendWithButtons(chatId,
+    `👶 *What is Johnson doing now?*`,
+    [
+      [
+        { text: '🍽 Eating',   callback_data: 'dash_eat' },
+        { text: '😴 Sleeping', callback_data: 'dash_slp' }
+      ],
+      [
+        { text: '🎮 Playing',  callback_data: 'dash_ply' },
+        { text: '📚 Reading',  callback_data: 'dash_rd'  }
+      ],
+      [
+        { text: '🚿 Bath',     callback_data: 'dash_bth' },
+        { text: '💩 Poop',     callback_data: 'dash_poo' }
+      ],
+      [
+        { text: '💊 Vitamins', callback_data: 'dash_vit' },
+        { text: '📝 Note',     callback_data: 'dash_nte' }
+      ]
+    ]
+  );
+}
+
+// === DASHBOARD — handle all dash_ callback_queries ===
+
+async function handleDashboardCallback(data, chatId, userId, senderName, pht) {
+  const today   = pht.toISOString().slice(0, 10);
+  const nowISO  = pht.toISOString();
+  const nowTime = pht.toISOString().slice(11, 16);
+
+  // ── 🍽 EATING ──────────────────────────────────────────────
+  if (data === 'dash_eat') {
+    await setConversationState(userId, {
+      action_type: 'eating', step: 'food_name',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendTelegram(chatId, `🍽 What is Johnson eating?`);
+    return;
+  }
+
+  // ── 😴 SLEEPING — ask type ──────────────────────────────────
+  if (data === 'dash_slp') {
+    await setConversationState(userId, {
+      action_type: 'sleeping', step: 'sleep_type',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendWithButtons(chatId, `😴 Is this a nap or bedtime?`, [[
+      { text: '💤 Nap',      callback_data: 'dash_slp_n' },
+      { text: '🌙 Bedtime',  callback_data: 'dash_slp_b' }
+    ]]);
+    return;
+  }
+
+  // ── 😴 SLEEPING — nap or bedtime selected ───────────────────
+  if (data === 'dash_slp_n' || data === 'dash_slp_b') {
+    const state     = await getConversationState(userId);
+    const clickedAt = state?.clicked_at || nowISO;
+    const sleepType = data === 'dash_slp_n' ? 'Nap' : 'Bedtime';
+    const dispTime  = new Date(clickedAt).toISOString().slice(11, 16);
+
+    const { data: action } = await supabase.from('caregiver_actions').insert({
+      caregiver_name: senderName,
+      action_type: 'sleeping',
+      clicked_at: clickedAt,
+      date: today,
+      details: { sleep_type: sleepType },
+      status: 'sleeping'
+    }).select().single();
+
+    await clearConversationState(userId);
+
+    const emoji = data === 'dash_slp_n' ? '💤' : '🌙';
+    await sendWithButtons(chatId,
+      `${emoji} Johnson started ${sleepType.toLowerCase()} at *${dispTime}*.\nI'll track the duration.`,
+      [[{ text: '☀️ Johnson is awake!', callback_data: `dash_wk_${action.id}` }]]
+    );
+    return;
+  }
+
+  // ── ☀️ WAKE UP ──────────────────────────────────────────────
+  if (data.startsWith('dash_wk_')) {
+    const actionId = data.slice(8);
+    const { data: action } = await supabase
+      .from('caregiver_actions').select('*').eq('id', actionId).single();
+    if (!action) return;
+
+    const startTime    = new Date(action.clicked_at);
+    const durationMs   = pht - startTime;
+    const durationMins = Math.round(durationMs / 60000);
+    const hours        = Math.floor(durationMins / 60);
+    const mins         = durationMins % 60;
+    const durationStr  = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    const startDisp    = action.clicked_at.slice(11, 16);
+
+    await supabase.from('caregiver_actions').update({
+      status: 'complete',
+      details: { ...action.details, end_time: nowISO, duration_mins: durationMins }
+    }).eq('id', actionId);
+
+    await supabase.from('activity_logs').insert({
+      date: action.date || today,
+      time: startDisp,
+      activity: action.details?.sleep_type || 'Sleep',
+      notes: `Duration: ${durationStr}. Woke at ${nowTime}.`,
+      source: 'dashboard'
+    });
+
+    await sendTelegram(chatId,
+      `☀️ Johnson is awake! ${action.details?.sleep_type || 'Sleep'} duration: *${durationStr}* ✅`
+    );
+    return;
+  }
+
+  // ── 🎮 PLAYING ──────────────────────────────────────────────
+  if (data === 'dash_ply') {
+    await setConversationState(userId, {
+      action_type: 'playing', step: 'play_activity',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendTelegram(chatId, `🎮 What is Johnson playing?`);
+    return;
+  }
+
+  // ── 📚 READING ──────────────────────────────────────────────
+  if (data === 'dash_rd') {
+    await setConversationState(userId, {
+      action_type: 'reading', step: 'book_name',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendTelegram(chatId, `📚 What is Johnson reading?`);
+    return;
+  }
+
+  // ── 🚿 BATH — immediate log ──────────────────────────────────
+  if (data === 'dash_bth') {
+    await Promise.all([
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'bath',
+        clicked_at: nowISO, date: today, details: {}, status: 'complete'
+      }),
+      supabase.from('activity_logs').insert({
+        date: today, time: nowTime, activity: 'Bath', notes: '', source: 'dashboard'
+      })
+    ]);
+    await sendTelegram(chatId, `🚿 Bath time logged at *${nowTime}* ✅`);
+    return;
+  }
+
+  // ── 💩 POOP — ask type ───────────────────────────────────────
+  if (data === 'dash_poo') {
+    await setConversationState(userId, {
+      action_type: 'poop', step: 'poop_type',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendWithButtons(chatId, `💩 What kind?`, [
+      [
+        { text: '✅ Normal',  callback_data: 'dash_poo_n' },
+        { text: '💧 Soft',    callback_data: 'dash_poo_s' }
+      ],
+      [
+        { text: '🪨 Hard',   callback_data: 'dash_poo_h' },
+        { text: '💦 Watery', callback_data: 'dash_poo_w' }
+      ]
+    ]);
+    return;
+  }
+
+  // ── 💩 POOP — type selected ──────────────────────────────────
+  if (['dash_poo_n','dash_poo_s','dash_poo_h','dash_poo_w'].includes(data)) {
+    const state     = await getConversationState(userId);
+    const clickedAt = state?.clicked_at || nowISO;
+    const dispTime  = new Date(clickedAt).toISOString().slice(11, 16);
+    const types     = { dash_poo_n: 'Normal', dash_poo_s: 'Soft', dash_poo_h: 'Hard', dash_poo_w: 'Watery' };
+    const poopType  = types[data];
+
+    await Promise.all([
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'poop',
+        clicked_at: clickedAt, date: today, details: { type: poopType }, status: 'complete'
+      }),
+      supabase.from('activity_logs').insert({
+        date: today, time: dispTime, activity: 'Poop', notes: poopType, source: 'dashboard'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `💩 *${poopType}* poop logged at *${dispTime}* ✅`);
+    return;
+  }
+
+  // ── 💊 VITAMINS — show options ───────────────────────────────
+  if (data === 'dash_vit') {
+    await setConversationState(userId, {
+      action_type: 'vitamin', step: 'vit_type',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendWithButtons(chatId, `💊 Which vitamin?`, [
+      [
+        { text: '☀️ Vitamin D',      callback_data: 'dash_vit_d' },
+        { text: '🌈 Multivitamin',   callback_data: 'dash_vit_m' }
+      ],
+      [
+        { text: '✏️ Other (type it)', callback_data: 'dash_vit_o' }
+      ]
+    ]);
+    return;
+  }
+
+  // ── 💊 VITAMINS — preset selected ───────────────────────────
+  if (data === 'dash_vit_d' || data === 'dash_vit_m') {
+    const state     = await getConversationState(userId);
+    const clickedAt = state?.clicked_at || nowISO;
+    const dispTime  = new Date(clickedAt).toISOString().slice(11, 16);
+    const vitName   = data === 'dash_vit_d' ? 'Vitamin D' : 'Multivitamin';
+
+    await Promise.all([
+      supabase.from('vitamin_logs').upsert({
+        date: today, vitamin_name: vitName, taken: true,
+        time_taken: dispTime, source: 'dashboard'
+      }, { onConflict: 'date,vitamin_name' }),
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'vitamin',
+        clicked_at: clickedAt, date: today, details: { name: vitName }, status: 'complete'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `💊 *${vitName}* logged at *${dispTime}* ✅`);
+    return;
+  }
+
+  // ── 💊 VITAMINS — other (needs text reply) ───────────────────
+  if (data === 'dash_vit_o') {
+    const state = await getConversationState(userId);
+    await setConversationState(userId, { ...state, step: 'vit_name' });
+    await sendTelegram(chatId, `💊 Which vitamin? Type the name:`);
+    return;
+  }
+
+  // ── 📝 NOTE ──────────────────────────────────────────────────
+  if (data === 'dash_nte') {
+    await setConversationState(userId, {
+      action_type: 'note', step: 'note_text',
+      clicked_at: nowISO, caregiver_name: senderName
+    });
+    await sendTelegram(chatId, `📝 What's the note?`);
+    return;
+  }
+
+  // ── 🍽 PORTION — after eating ────────────────────────────────
+  if (data.startsWith('dash_por_')) {
+    const rest       = data.slice(9);          // e.g. "a_uuid-here"
+    const portionKey = rest[0];                // 'a','h','f','r'
+    const foodLogId  = rest.slice(2);          // uuid
+    const labels     = { a: 'All', h: 'Half', f: 'Few bites', r: 'Refused' };
+    const label      = labels[portionKey] || portionKey;
+
+    await supabase.from('food_logs').update({ portion: label }).eq('id', foodLogId);
+    await sendTelegram(chatId, `✅ Updated — Johnson ate *${label}*`);
+    return;
+  }
+}
+
+// === DASHBOARD — handle caregiver text reply when state is pending ===
+
+async function handleConversationReply(state, text, chatId, userId, senderName, today, nowTime) {
+  const clickedTime = state.clicked_at
+    ? new Date(state.clicked_at).toISOString().slice(11, 16)
+    : nowTime;
+
+  // 🍽 EATING — food name
+  if (state.action_type === 'eating' && state.step === 'food_name') {
+    const { data: foodLog } = await supabase.from('food_logs').insert({
+      date: today, time: clickedTime,
+      name: text, food_type: 'food', portion: '', source: 'dashboard'
+    }).select().single();
+
+    await supabase.from('caregiver_actions').insert({
+      caregiver_name: senderName, action_type: 'eating',
+      clicked_at: state.clicked_at, date: today,
+      details: { food: text }, status: 'complete'
+    });
+
+    await clearConversationState(userId);
+
+    await sendWithButtons(chatId,
+      `✅ Logged: Johnson ate *${text}* at *${clickedTime}*\n\nHow much did he eat?`,
+      [
+        [
+          { text: '😋 All',       callback_data: `dash_por_a_${foodLog.id}` },
+          { text: '🍽 Half',      callback_data: `dash_por_h_${foodLog.id}` }
+        ],
+        [
+          { text: '🥄 Few bites', callback_data: `dash_por_f_${foodLog.id}` },
+          { text: '🙅 Refused',   callback_data: `dash_por_r_${foodLog.id}` }
+        ]
+      ]
+    );
+
+    // Fire food context reminders
+    const { data: ctxFood } = await supabase
+      .from('context_reminders').select('*').eq('trigger', 'food').eq('active', true);
+    for (const c of ctxFood || []) await sendTelegram(chatId, `🔔 *Reminder:* ${c.message}`);
+    return true;
+  }
+
+  // 🎮 PLAYING
+  if (state.action_type === 'playing' && state.step === 'play_activity') {
+    await Promise.all([
+      supabase.from('activity_logs').insert({
+        date: today, time: clickedTime, activity: 'Playing', notes: text, source: 'dashboard'
+      }),
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'playing',
+        clicked_at: state.clicked_at, date: today, details: { activity: text }, status: 'complete'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `🎮 Logged: Johnson played *${text}* at *${clickedTime}* ✅`);
+    return true;
+  }
+
+  // 📚 READING
+  if (state.action_type === 'reading' && state.step === 'book_name') {
+    await Promise.all([
+      supabase.from('activity_logs').insert({
+        date: today, time: clickedTime, activity: 'Reading', notes: text, source: 'dashboard'
+      }),
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'reading',
+        clicked_at: state.clicked_at, date: today, details: { book: text }, status: 'complete'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `📚 Logged: Johnson read *${text}* at *${clickedTime}* ✅`);
+    return true;
+  }
+
+  // 💊 VITAMIN — other (typed name)
+  if (state.action_type === 'vitamin' && state.step === 'vit_name') {
+    await Promise.all([
+      supabase.from('vitamin_logs').upsert({
+        date: today, vitamin_name: text, taken: true,
+        time_taken: clickedTime, source: 'dashboard'
+      }, { onConflict: 'date,vitamin_name' }),
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'vitamin',
+        clicked_at: state.clicked_at, date: today, details: { name: text }, status: 'complete'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `💊 *${text}* logged at *${clickedTime}* ✅`);
+    return true;
+  }
+
+  // 📝 NOTE
+  if (state.action_type === 'note' && state.step === 'note_text') {
+    await Promise.all([
+      supabase.from('activity_logs').insert({
+        date: today, time: clickedTime, activity: 'Note', notes: text, source: 'dashboard'
+      }),
+      supabase.from('caregiver_actions').insert({
+        caregiver_name: senderName, action_type: 'note',
+        clicked_at: state.clicked_at, date: today, details: { note: text }, status: 'complete'
+      })
+    ]);
+    await clearConversationState(userId);
+    await sendTelegram(chatId, `📝 Note saved at *${clickedTime}*: _${text}_ ✅`);
+    return true;
+  }
+
+  return false;
+}
+
+// === AI HANDLERS (existing) ===
+
 async function handleMention(message, senderName, today, nowTime) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -153,37 +568,32 @@ Respond ONLY with valid JSON (no markdown):
   catch { return { type: 'none', data: {}, confirmation: null }; }
 }
 
-async function answerCallback(callbackId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: callbackId, text })
-  });
-}
-
-async function editMessage(chatId, messageId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown' })
-  });
-}
+// === MAIN HANDLER ===
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(200).send('OK');
 
   const body = req.body;
 
-  // Handle inline keyboard button taps (Yes done / Not yet)
+  // ── Inline keyboard button taps ──────────────────────────────
   const callback = body?.callback_query;
   if (callback) {
-    const data = callback.data || '';
-    const callbackChatId = callback.message?.chat?.id?.toString();
-    const messageId = callback.message?.message_id;
-    const responderName = callback.from?.first_name || 'Someone';
+    const data             = callback.data || '';
+    const callbackChatId   = callback.message?.chat?.id?.toString();
+    const messageId        = callback.message?.message_id;
+    const responderName    = callback.from?.first_name || 'Someone';
+    const responderUserId  = callback.from?.id?.toString();
+    const pht              = new Date(Date.now() + 8 * 60 * 60 * 1000);
+
+    // Dashboard callbacks
+    if (data.startsWith('dash_')) {
+      await answerCallback(callback.id, '');
+      await handleDashboardCallback(data, callbackChatId, responderUserId, responderName, pht);
+      return res.status(200).send('OK');
+    }
 
     if (data.startsWith('ctx_yes_') || data.startsWith('ctx_no_')) {
-      const ctxId = data.startsWith('ctx_yes_') ? data.slice(8) : data.slice(7);
+      const ctxId    = data.startsWith('ctx_yes_') ? data.slice(8) : data.slice(7);
       const confirmed = data.startsWith('ctx_yes_');
       const { data: ctx } = await supabase.from('context_reminders').select('*').eq('id', ctxId).single();
       if (ctx) {
@@ -203,7 +613,7 @@ export default async function handler(req, res) {
     }
 
     if (data.startsWith('suggest_y_') || data.startsWith('suggest_n_')) {
-      const sugId = data.startsWith('suggest_y_') ? data.slice(10) : data.slice(10);
+      const sugId    = data.slice(10);
       const confirmed = data.startsWith('suggest_y_');
       if (confirmed) {
         await supabase.from('app_suggestions').update({ status: 'pending' }).eq('id', sugId);
@@ -218,9 +628,8 @@ export default async function handler(req, res) {
     }
 
     if (data.startsWith('pref_yes_') || data.startsWith('pref_no_')) {
-      const prefId = data.startsWith('pref_yes_') ? data.slice(9) : data.slice(8);
+      const prefId   = data.startsWith('pref_yes_') ? data.slice(9) : data.slice(8);
       const confirmed = data.startsWith('pref_yes_');
-
       const { data: pref } = await supabase.from('johnson_preferences').select('*').eq('id', prefId).single();
       if (pref) {
         if (confirmed) {
@@ -239,19 +648,15 @@ export default async function handler(req, res) {
     }
 
     if (data.startsWith('done_') || data.startsWith('skip_')) {
-      const firstUnder = data.indexOf('_');
-      const lastUnder = data.lastIndexOf('_');
-      const action = data.slice(0, firstUnder);
-      const scheduleId = data.slice(firstUnder + 1, lastUnder);
-      const date = data.slice(lastUnder + 1);
-      const completed = action === 'done';
+      const firstUnder  = data.indexOf('_');
+      const lastUnder   = data.lastIndexOf('_');
+      const action      = data.slice(0, firstUnder);
+      const scheduleId  = data.slice(firstUnder + 1, lastUnder);
+      const date        = data.slice(lastUnder + 1);
+      const completed   = action === 'done';
 
       const { data: schedItem } = await supabase
-        .from('master_schedule')
-        .select('activity')
-        .eq('id', scheduleId)
-        .single();
-
+        .from('master_schedule').select('activity').eq('id', scheduleId).single();
       const activity = schedItem?.activity || 'Activity';
 
       await supabase.from('master_schedule_log')
@@ -261,8 +666,7 @@ export default async function handler(req, res) {
 
       await answerCallback(callback.id, completed ? '✅ Marked as done!' : '⏰ Noted, will try later!');
       await editMessage(
-        callbackChatId,
-        messageId,
+        callbackChatId, messageId,
         completed
           ? `✅ *${activity}* — Done! Thanks ${responderName}! 🎉`
           : `⏰ *${activity}* — Not done yet. Noted by ${responderName}.`
@@ -275,14 +679,15 @@ export default async function handler(req, res) {
   const msg = body?.message;
   if (!msg) return res.status(200).send('OK');
 
-  const chatId = msg.chat?.id?.toString();
-  const text = msg.text || '';
-  const caption = msg.caption || '';
-  const hasPhoto = !!msg.photo;
-  const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  const today = pht.toISOString().slice(0, 10);
-  const nowTime = pht.toISOString().slice(11, 16);
+  const chatId     = msg.chat?.id?.toString();
+  const text       = msg.text || '';
+  const caption    = msg.caption || '';
+  const hasPhoto   = !!msg.photo;
+  const pht        = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const today      = pht.toISOString().slice(0, 10);
+  const nowTime    = pht.toISOString().slice(11, 16);
   const senderName = msg.from?.first_name || 'Someone';
+  const userId     = msg.from?.id?.toString();
 
   if (chatId !== GROUP_ID) return res.status(200).send('OK');
   if (msg.from?.is_bot) return res.status(200).send('OK');
@@ -290,9 +695,33 @@ export default async function handler(req, res) {
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
-  // Check if bot is @mentioned
+  // ── /dashboard command ───────────────────────────────────────
+  if (text.toLowerCase().startsWith('/dashboard')) {
+    await sendDashboard(chatId);
+    return res.status(200).send('OK');
+  }
+
+  // ── Check for pending conversation state ─────────────────────
+  const convState = await getConversationState(userId);
+  if (convState) {
+    // If user @mentions the bot while a state is pending, clear state and fall through to mention handling
+    const botUsername = await getBotUsername();
+    const entities    = msg.entities || msg.caption_entities || [];
+    const isMentioned = entities
+      .filter(e => e.type === 'mention')
+      .some(e => content.slice(e.offset, e.offset + e.length).toLowerCase() === botUsername.toLowerCase());
+
+    if (!isMentioned) {
+      const handled = await handleConversationReply(convState, content, chatId, userId, senderName, today, nowTime);
+      if (handled) return res.status(200).send('OK');
+    } else {
+      await clearConversationState(userId);
+    }
+  }
+
+  // ── @mention handling ────────────────────────────────────────
   const botUsername = await getBotUsername();
-  const entities = msg.entities || msg.caption_entities || [];
+  const entities    = msg.entities || msg.caption_entities || [];
   const isMentioned = entities
     .filter(e => e.type === 'mention')
     .some(e => content.slice(e.offset, e.offset + e.length).toLowerCase() === botUsername.toLowerCase());
@@ -301,30 +730,23 @@ export default async function handler(req, res) {
     const cleanMessage = content.replace(new RegExp(botUsername, 'gi'), '').trim();
     const action = await handleMention(cleanMessage || '(no message)', senderName, today, nowTime);
 
-    // Bulk insert (multiple activities in one message)
     if (action.type === 'bulk' && action.actions?.length) {
       let count = 0;
       for (const a of action.actions) {
         if (a.type === 'add_routine' && a.data?.activity) {
           await supabase.from('master_schedule').insert({
-            time: a.data.time || '00:00',
-            activity: a.data.activity,
-            color: a.data.color || '#7F77DD',
-            active: true
+            time: a.data.time || '00:00', activity: a.data.activity,
+            color: a.data.color || '#7F77DD', active: true
           });
           count++;
         } else if (a.type === 'add_schedule' && a.data?.activity) {
           await supabase.from('schedule').insert({
             date: today, time: a.data.time || '00:00',
-            activity: a.data.activity,
-            color: a.data.color || '#7F77DD',
-            source: 'telegram'
+            activity: a.data.activity, color: a.data.color || '#7F77DD', source: 'telegram'
           });
           count++;
         } else if (a.type === 'add_reminder' && a.data?.time && a.data?.message) {
-          await supabase.from('reminders').insert({
-            time: a.data.time, message: a.data.message, active: true
-          });
+          await supabase.from('reminders').insert({ time: a.data.time, message: a.data.message, active: true });
           count++;
         } else if (a.type === 'add_food' && a.data?.name) {
           await supabase.from('food_logs').insert({
@@ -341,33 +763,22 @@ export default async function handler(req, res) {
 
     if (action.type === 'add_food' && action.data?.name) {
       await supabase.from('food_logs').insert({
-        date: today,
-        time: action.data.time || nowTime,
-        name: action.data.name,
-        food_type: action.data.food_type || 'food',
-        portion: action.data.portion || '',
-        source: 'telegram'
+        date: today, time: action.data.time || nowTime,
+        name: action.data.name, food_type: action.data.food_type || 'food',
+        portion: action.data.portion || '', source: 'telegram'
       });
     }
-
     if (action.type === 'add_schedule' && action.data?.time && action.data?.activity) {
       await supabase.from('schedule').insert({
-        date: today,
-        time: action.data.time,
-        activity: action.data.activity,
-        color: '#7F77DD',
-        source: 'telegram'
+        date: today, time: action.data.time, activity: action.data.activity,
+        color: '#7F77DD', source: 'telegram'
       });
     }
-
     if (action.type === 'add_reminder' && action.data?.time && action.data?.message) {
       await supabase.from('reminders').insert({
-        time: action.data.time,
-        message: action.data.message,
-        active: true
+        time: action.data.time, message: action.data.message, active: true
       });
     }
-
     if (action.type === 'show_food') {
       const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
       if (!foods?.length) {
@@ -378,7 +789,6 @@ export default async function handler(req, res) {
       }
       return res.status(200).send('OK');
     }
-
     if (action.type === 'show_preferences') {
       const prefType = action.data?.pref_type || 'all';
       const category = action.data?.category || 'all';
@@ -389,33 +799,25 @@ export default async function handler(req, res) {
       if (!prefs?.length) {
         await sendTelegram(chatId, `No ${prefType === 'all' ? '' : prefType + 's '}logged for Johnson yet!`);
       } else {
-        const likes = prefs.filter(p => p.pref_type === 'like');
+        const likes    = prefs.filter(p => p.pref_type === 'like');
         const dislikes = prefs.filter(p => p.pref_type === 'dislike');
-        let msg = `💛 *Johnson's preferences:*\n`;
-        if (likes.length) msg += `\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
-        if (dislikes.length) msg += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
-        await sendTelegram(chatId, msg);
+        let m = `💛 *Johnson's preferences:*\n`;
+        if (likes.length)    m += `\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+        if (dislikes.length) m += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+        await sendTelegram(chatId, m);
       }
       return res.status(200).send('OK');
     }
-
     if (action.type === 'add_activity' && action.data?.activity) {
       await supabase.from('activity_logs').insert({
-        date: today,
-        time: action.data.time || nowTime,
-        activity: action.data.activity,
-        notes: action.data.notes || '',
-        source: 'telegram'
+        date: today, time: action.data.time || nowTime,
+        activity: action.data.activity, notes: action.data.notes || '', source: 'telegram'
       });
     }
-
     if (action.type === 'show_activity') {
-      const dateRef = action.data?.date_ref || 'today';
-      const queryDate = dateRef === 'yesterday'
-        ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-        : today;
-      const { data: acts } = await supabase
-        .from('activity_logs').select('*').eq('date', queryDate).order('time');
+      const queryDate = action.data?.date_ref === 'yesterday'
+        ? new Date(Date.now() - 86400000).toISOString().slice(0, 10) : today;
+      const { data: acts } = await supabase.from('activity_logs').select('*').eq('date', queryDate).order('time');
       if (!acts?.length) {
         await sendTelegram(chatId, `No activities logged for Johnson on ${queryDate}! 📋`);
       } else {
@@ -424,7 +826,6 @@ export default async function handler(req, res) {
       }
       return res.status(200).send('OK');
     }
-
     if (action.type === 'show_schedule') {
       const [{ data: sched }, { data: routine }] = await Promise.all([
         supabase.from('schedule').select('*').eq('date', today).order('time'),
@@ -432,7 +833,7 @@ export default async function handler(req, res) {
       ]);
       const allItems = [
         ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
-        ...(sched || []).map(s => ({ time: s.time, activity: s.activity + ' _(today only)_' }))
+        ...(sched   || []).map(s => ({ time: s.time, activity: s.activity + ' _(today only)_' }))
       ].sort((a, b) => a.time.localeCompare(b.time));
       if (!allItems.length) {
         await sendTelegram(chatId, "No schedule items for today! 📅");
@@ -442,12 +843,10 @@ export default async function handler(req, res) {
       }
       return res.status(200).send('OK');
     }
-
     if (action.type === 'limitation') {
       await sendTelegram(chatId, action.reply || "I can't do that yet!");
       const { data: inserted } = await supabase.from('app_suggestions').insert({
-        priority: 'medium',
-        category: 'new_feature',
+        priority: 'medium', category: 'new_feature',
         title: action.data?.title || 'Feature request from chat',
         description: action.data?.description || action.reply || '',
         reason: action.data?.reason || `Requested by ${senderName} in group chat`,
@@ -458,7 +857,7 @@ export default async function handler(req, res) {
           `💡 Want me to add *"${action.data?.title || 'this feature'}"* to the app recommendations for the next update?`,
           [[
             { text: '✅ Yes, recommend it', callback_data: `suggest_y_${inserted.id}` },
-            { text: '❌ No thanks', callback_data: `suggest_n_${inserted.id}` }
+            { text: '❌ No thanks',          callback_data: `suggest_n_${inserted.id}` }
           ]]
         );
       }
@@ -469,42 +868,31 @@ export default async function handler(req, res) {
     return res.status(200).send('OK');
   }
 
-  // Otherwise parse as a baby care log entry
+  // ── Passive message parsing ──────────────────────────────────
   const parsed = await parseMessageWithAI(content, hasPhoto ? caption : null);
 
   if (parsed.type === 'food' && parsed.data?.name) {
     await supabase.from('food_logs').insert({
-      date: today,
-      time: parsed.data.time || nowTime,
-      name: parsed.data.name,
-      food_type: parsed.data.food_type || 'food',
-      portion: parsed.data.portion || '',
-      notes: parsed.data.notes || '',
-      source: 'telegram'
+      date: today, time: parsed.data.time || nowTime,
+      name: parsed.data.name, food_type: parsed.data.food_type || 'food',
+      portion: parsed.data.portion || '', notes: parsed.data.notes || '', source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
-    // Fire context reminders for food
     const { data: ctxFood } = await supabase.from('context_reminders').select('*').eq('trigger', 'food').eq('active', true);
     for (const c of ctxFood || []) await sendTelegram(chatId, `🔔 *Reminder:* ${c.message}`);
   }
 
   else if (parsed.type === 'vitamin' && parsed.data?.name) {
     await supabase.from('vitamin_logs').upsert({
-      date: today,
-      vitamin_name: parsed.data.name,
-      taken: true,
-      time_taken: parsed.data.time || nowTime,
-      source: 'telegram'
+      date: today, vitamin_name: parsed.data.name, taken: true,
+      time_taken: parsed.data.time || nowTime, source: 'telegram'
     }, { onConflict: 'date,vitamin_name' });
     if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
   }
 
   else if (parsed.type === 'schedule' && parsed.data?.activity) {
     await supabase.from('schedule').insert({
-      time: parsed.data.time,
-      activity: parsed.data.activity,
-      date: today,
-      source: 'telegram'
+      time: parsed.data.time, activity: parsed.data.activity, date: today, source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `📅 ${parsed.confirmation}`);
   }
@@ -512,9 +900,7 @@ export default async function handler(req, res) {
   else if (parsed.type === 'context_reminder' && parsed.data?.message) {
     const trigger = parsed.data.trigger || 'food';
     const { data: inserted } = await supabase.from('context_reminders').insert({
-      trigger,
-      message: parsed.data.message,
-      active: false
+      trigger, message: parsed.data.message, active: false
     }).select().single();
     if (inserted) {
       const triggerLabel = trigger === 'food' ? 'Johnson eats' : `${trigger} time`;
@@ -522,7 +908,7 @@ export default async function handler(req, res) {
         `🔔 Got it! Want me to remind everyone:\n\n_"${parsed.data.message}"_\n\n...every time *${triggerLabel}*?`,
         [[
           { text: '✅ Yes, set this reminder', callback_data: `ctx_yes_${inserted.id}` },
-          { text: '❌ No thanks', callback_data: `ctx_no_${inserted.id}` }
+          { text: '❌ No thanks',              callback_data: `ctx_no_${inserted.id}` }
         ]]
       );
     }
@@ -531,9 +917,9 @@ export default async function handler(req, res) {
   else if (parsed.type === 'preference' && parsed.data?.item) {
     const { data: inserted } = await supabase.from('johnson_preferences').insert({
       pref_type: parsed.data.pref_type || 'like',
-      category: parsed.data.category || 'food',
-      item: parsed.data.item,
-      status: 'pending'
+      category:  parsed.data.category  || 'food',
+      item:      parsed.data.item,
+      status:    'pending'
     }).select().single();
     if (inserted) {
       const emoji = parsed.data.pref_type === 'dislike' ? '🚫' : '💛';
@@ -542,7 +928,7 @@ export default async function handler(req, res) {
         `${emoji} It sounds like Johnson *${parsed.data.pref_type === 'dislike' ? "doesn't like" : 'loves'}* *${parsed.data.item}*!\n\nWant me to add that to his ${label} log?`,
         [[
           { text: `✅ Yes, add to ${label}s`, callback_data: `pref_yes_${inserted.id}` },
-          { text: '❌ No thanks', callback_data: `pref_no_${inserted.id}` }
+          { text: '❌ No thanks',             callback_data: `pref_no_${inserted.id}` }
         ]]
       );
     }
@@ -550,18 +936,14 @@ export default async function handler(req, res) {
 
   else if (parsed.type === 'activity' && parsed.data?.activity) {
     await supabase.from('activity_logs').insert({
-      date: today,
-      time: parsed.data.time || nowTime,
-      activity: parsed.data.activity,
-      notes: parsed.data.notes || '',
-      source: 'telegram'
+      date: today, time: parsed.data.time || nowTime,
+      activity: parsed.data.activity, notes: parsed.data.notes || '', source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
   }
 
   else if (parsed.type === 'query_food') {
-    const { data: foods } = await supabase
-      .from('food_logs').select('*').eq('date', today).order('time');
+    const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
     if (!foods?.length) {
       await sendTelegram(chatId, "Johnson hasn't eaten anything yet today! 🍽️");
     } else {
@@ -574,8 +956,7 @@ export default async function handler(req, res) {
   }
 
   else if (parsed.type === 'query_vitamins') {
-    const { data: vits } = await supabase
-      .from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
+    const { data: vits } = await supabase.from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
     if (!vits?.length) {
       await sendTelegram(chatId, "No vitamins logged for Johnson today! 💊");
     } else {
@@ -586,7 +967,7 @@ export default async function handler(req, res) {
 
   else if (parsed.type === 'query_preferences') {
     const prefType = parsed.data?.pref_type || 'all';
-    const category = parsed.data?.category || 'all';
+    const category = parsed.data?.category  || 'all';
     let query = supabase.from('johnson_preferences').select('*').eq('status', 'confirmed').order('created_at');
     if (prefType !== 'all') query = query.eq('pref_type', prefType);
     if (category !== 'all') query = query.eq('category', category);
@@ -594,22 +975,20 @@ export default async function handler(req, res) {
     if (!prefs?.length) {
       await sendTelegram(chatId, `No preferences logged for Johnson yet! Try saying something like "Johnson loves chicken" or "Johnson doesn't like bitter melon".`);
     } else {
-      const likes = prefs.filter(p => p.pref_type === 'like');
+      const likes    = prefs.filter(p => p.pref_type === 'like');
       const dislikes = prefs.filter(p => p.pref_type === 'dislike');
-      let msg = `💛 *Johnson's preferences:*`;
-      if (likes.length) msg += `\n\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
-      if (dislikes.length) msg += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
-      await sendTelegram(chatId, msg);
+      let m = `💛 *Johnson's preferences:*`;
+      if (likes.length)    m += `\n\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+      if (dislikes.length) m += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+      await sendTelegram(chatId, m);
     }
   }
 
   else if (parsed.type === 'query_activity') {
-    const dateRef = parsed.data?.date_ref || 'today';
+    const dateRef   = parsed.data?.date_ref || 'today';
     const queryDate = dateRef === 'yesterday'
-      ? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-      : today;
-    const { data: acts } = await supabase
-      .from('activity_logs').select('*').eq('date', queryDate).order('time');
+      ? new Date(Date.now() - 86400000).toISOString().slice(0, 10) : today;
+    const { data: acts } = await supabase.from('activity_logs').select('*').eq('date', queryDate).order('time');
     if (!acts?.length) {
       await sendTelegram(chatId, `No activities logged for Johnson on ${queryDate}!`);
     } else {
@@ -625,7 +1004,7 @@ export default async function handler(req, res) {
     ]);
     const allItems = [
       ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
-      ...(sched || []).map(s => ({ time: s.time, activity: s.activity }))
+      ...(sched   || []).map(s => ({ time: s.time, activity: s.activity }))
     ].sort((a, b) => a.time.localeCompare(b.time));
     if (!allItems.length) {
       await sendTelegram(chatId, "No schedule items logged for Johnson today! 📅");

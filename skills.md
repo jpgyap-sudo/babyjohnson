@@ -159,6 +159,49 @@ The agent builds a running profile of Johnson from confirmed logs over time.
 
 ---
 
+## Telegram Caregiver Dashboard Skill
+**Trigger:** Type `/dashboard` in the Telegram group.
+
+Sends a one-tap button grid so caregivers log activities without typing:
+
+```
+👶 What is Johnson doing now?
+
+[🍽 Eating]   [😴 Sleeping]
+[🎮 Playing]  [📚 Reading]
+[🚿 Bath]     [💩 Poop]
+[💊 Vitamins] [📝 Note]
+```
+
+**Rules:**
+- The exact button-tap time is always used for the log — not the time of the text reply.
+- Each button triggers a smart follow-up question.
+- Ask only one question at a time. Use buttons for choices, text for open replies.
+- Confirm every log with a short friendly message.
+- If a caregiver @mentions the bot while a reply is pending, clear the pending state and handle the mention instead.
+
+**Smart flows per button:**
+
+| Button | Follow-up | What gets logged |
+|---|---|---|
+| 🍽 Eating | "What is Johnson eating?" → then [All / Half / Few bites / Refused] | `food_logs` + `caregiver_actions` |
+| 😴 Sleeping | [💤 Nap / 🌙 Bedtime] → shows [☀️ Johnson is awake!] button | `activity_logs` (with duration) + `caregiver_actions` |
+| 🎮 Playing | "What is he playing?" | `activity_logs` + `caregiver_actions` |
+| 📚 Reading | "What is he reading?" | `activity_logs` + `caregiver_actions` |
+| 🚿 Bath | Immediate log, no question | `activity_logs` + `caregiver_actions` |
+| 💩 Poop | [✅ Normal / 💧 Soft / 🪨 Hard / 💦 Watery] | `activity_logs` + `caregiver_actions` |
+| 💊 Vitamins | [☀️ Vitamin D / 🌈 Multivitamin / ✏️ Other] | `vitamin_logs` + `caregiver_actions` |
+| 📝 Note | "What's the note?" | `activity_logs` + `caregiver_actions` |
+
+**Sleep duration tracking:**
+1. Caregiver taps Sleeping → selects Nap or Bedtime → bot logs sleep start and shows [☀️ Johnson is awake!] button.
+2. Caregiver taps Wake up → bot calculates exact duration and logs it.
+
+**Context reminders:**
+After the Eating flow logs food, the bot automatically fires any active context reminders with trigger `food`.
+
+---
+
 ## Limitation Detection
 When the Telegram bot is asked to do something it can't do yet:
 
