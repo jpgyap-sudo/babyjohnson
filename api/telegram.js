@@ -32,27 +32,38 @@ async function handleMention(message, senderName, today, nowTime) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
+      max_tokens: 2000,
       system: `You are the assistant bot for Baby Johnson's family care app. Today is ${today}, current time is ${nowTime}.
 
-You can perform these actions when asked:
-- Answer baby care questions (nutrition, health, milestones, recipes)
-- Log food/drink/snack entries
-- Add schedule items for today
-- Set reminders
-- Show today's food log or schedule (reply with show_food or show_schedule type)
-
-Respond ONLY with valid JSON (no markdown):
+Single actions — respond with:
 {
-  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "show_food" | "show_schedule",
-  "reply": "Friendly message to send back to the group",
+  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "show_food" | "show_schedule",
+  "reply": "...",
   "data": {
-    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM or null" }
+    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
     // add_schedule: { "time": "HH:MM", "activity": "..." }
     // add_reminder: { "time": "HH:MM", "message": "..." }
-    // chat / show_food / show_schedule: {}
+    // add_routine: { "time": "HH:MM", "activity": "..." }
+    // others: {}
   }
-}`,
+}
+
+BULK input (multiple activities or a full schedule block) — respond with:
+{
+  "type": "bulk",
+  "reply": "Added X items! Here's what I added: ...",
+  "actions": [
+    { "type": "add_routine", "data": { "time": "07:00", "activity": "Breakfast" } },
+    { "type": "add_routine", "data": { "time": "08:00", "activity": "Playground" } }
+  ]
+}
+
+Rules:
+- Use "bulk" whenever the user provides 2 or more activities at once
+- For time ranges like "8:00–9:00", use the start time "08:00"
+- For activities without a clear time, make a reasonable estimate based on context
+- "add_routine" = repeats every day (master schedule); "add_schedule" = today only
+- Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
     })
   });
@@ -196,6 +207,44 @@ export default async function handler(req, res) {
   if (isMentioned) {
     const cleanMessage = content.replace(new RegExp(botUsername, 'gi'), '').trim();
     const action = await handleMention(cleanMessage || '(no message)', senderName, today, nowTime);
+
+    // Bulk insert (multiple activities in one message)
+    if (action.type === 'bulk' && action.actions?.length) {
+      let count = 0;
+      for (const a of action.actions) {
+        if (a.type === 'add_routine' && a.data?.activity) {
+          await supabase.from('master_schedule').insert({
+            time: a.data.time || '00:00',
+            activity: a.data.activity,
+            color: a.data.color || '#7F77DD',
+            active: true
+          });
+          count++;
+        } else if (a.type === 'add_schedule' && a.data?.activity) {
+          await supabase.from('schedule').insert({
+            date: today, time: a.data.time || '00:00',
+            activity: a.data.activity,
+            color: a.data.color || '#7F77DD',
+            source: 'telegram'
+          });
+          count++;
+        } else if (a.type === 'add_reminder' && a.data?.time && a.data?.message) {
+          await supabase.from('reminders').insert({
+            time: a.data.time, message: a.data.message, active: true
+          });
+          count++;
+        } else if (a.type === 'add_food' && a.data?.name) {
+          await supabase.from('food_logs').insert({
+            date: today, time: a.data.time || nowTime,
+            name: a.data.name, food_type: a.data.food_type || 'food',
+            portion: a.data.portion || '', source: 'telegram'
+          });
+          count++;
+        }
+      }
+      await sendTelegram(chatId, action.reply || `✅ Added ${count} items!`);
+      return res.status(200).send('OK');
+    }
 
     if (action.type === 'add_food' && action.data?.name) {
       await supabase.from('food_logs').insert({

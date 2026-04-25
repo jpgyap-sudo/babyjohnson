@@ -23,27 +23,35 @@ export default async function handler(req, res) {
       max_tokens: 500,
       system: `You are an AI assistant for Baby Johnson's care app. Today is ${today}, current time is ${nowTime}.
 
-You can perform any of these actions:
-- add_food: Log a food, drink, or snack entry for today
-- add_vitamin: Mark a vitamin as taken today
-- add_schedule: Add an activity to today's one-time schedule
-- add_reminder: Set a daily recurring reminder (sent via Telegram at a set time)
-- add_routine: Add to the master daily routine (repeats every day, sends Telegram notification)
-- chat: Answer questions about baby care, nutrition, development
-
-Respond ONLY with valid JSON (no markdown):
+Single action:
 {
   "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "chat",
   "reply": "Short friendly confirmation or answer",
   "data": {
-    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM or null" }
+    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
     // add_vitamin: { "name": "..." }
     // add_schedule: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // add_reminder: { "time": "HH:MM", "message": "..." }
     // add_routine: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // chat: {}
   }
-}`,
+}
+
+BULK input (2 or more activities at once):
+{
+  "type": "bulk",
+  "reply": "Added X items! ...",
+  "actions": [
+    { "type": "add_routine", "data": { "time": "07:00", "activity": "Breakfast" } }
+  ]
+}
+
+Rules:
+- Use "bulk" whenever the user provides 2+ activities
+- For time ranges like "8:00–9:00", use start time "08:00"
+- For activities with no time, make a reasonable estimate from context
+- "add_routine" = repeats every day; "add_schedule" = today only
+- Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: message }]
     })
   });
@@ -57,6 +65,29 @@ Respond ONLY with valid JSON (no markdown):
     parsed = JSON.parse(txt.replace(/```json|```/g, '').trim());
   } catch {
     return res.status(200).json({ type: 'chat', reply: txt, data: {} });
+  }
+
+  if (parsed.type === 'bulk' && parsed.actions?.length) {
+    let count = 0;
+    for (const a of parsed.actions) {
+      if (a.type === 'add_routine' && a.data?.activity) {
+        await supabase.from('master_schedule').insert({ time: a.data.time || '00:00', activity: a.data.activity, color: a.data.color || '#7F77DD', active: true });
+        count++;
+      } else if (a.type === 'add_schedule' && a.data?.activity) {
+        await supabase.from('schedule').insert({ time: a.data.time || '00:00', activity: a.data.activity, color: a.data.color || '#7F77DD', source: 'app' });
+        count++;
+      } else if (a.type === 'add_reminder' && a.data?.time && a.data?.message) {
+        await supabase.from('reminders').insert({ time: a.data.time, message: a.data.message, active: true });
+        count++;
+      } else if (a.type === 'add_food' && a.data?.name) {
+        await supabase.from('food_logs').insert({ date: today, time: a.data.time || nowTime, name: a.data.name, food_type: a.data.food_type || 'food', portion: a.data.portion || '', source: 'app' });
+        count++;
+      } else if (a.type === 'add_vitamin' && a.data?.name) {
+        await supabase.from('vitamin_logs').upsert({ date: today, vitamin_name: a.data.name, taken: true, time_taken: nowTime, source: 'app' }, { onConflict: 'date,vitamin_name' });
+        count++;
+      }
+    }
+    return res.status(200).json({ type: 'bulk', reply: parsed.reply || `✅ Added ${count} items!` });
   }
 
   if (parsed.type === 'add_food' && parsed.data?.name) {
