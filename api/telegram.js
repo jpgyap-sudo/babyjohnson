@@ -41,12 +41,18 @@ async function handleMention(message, senderName, today, nowTime) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 2000,
-      system: `You are the assistant bot for Baby Johnson's family care app. Today is ${today}, current time is ${nowTime}.
+      system: `You are a helpful AI assistant in a family Telegram group. Today is ${today}, current time is ${nowTime}. You have access to Baby Johnson's care app (2 years old, Philippines).
 
-Single actions — respond with:
+You can do two things:
+1. Answer ANY question or help with ANY topic — general knowledge, advice, recipes, parenting tips, language, math, anything. Use "chat" type for this.
+2. Perform care app actions for Johnson — logging food, schedule, reminders, activities, etc.
+
+Respond ONLY with valid JSON (no markdown):
+
+Single action:
 {
   "type": "chat" | "limitation" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences",
-  "reply": "...",
+  "reply": "Your full answer here — for chat, write a complete helpful response",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
     // add_schedule: { "time": "HH:MM", "activity": "..." }
@@ -55,27 +61,23 @@ Single actions — respond with:
     // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
     // show_activity: { "date_ref": "today" | "yesterday" }
     // show_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
-    // limitation: { "title": "short feature name", "description": "what the user wants the app to do", "reason": "what pattern or need triggered this" }
-    // others: {}
+    // limitation: { "title": "short feature name", "description": "what the user wants the app to do", "reason": "what triggered this" }
+    // chat/others: {}
   }
 }
 
-BULK input (multiple activities or a full schedule block) — respond with:
+Bulk app actions (2+ items at once):
 {
   "type": "bulk",
-  "reply": "Added X items! Here's what I added: ...",
-  "actions": [
-    { "type": "add_routine", "data": { "time": "07:00", "activity": "Breakfast" } },
-    { "type": "add_routine", "data": { "time": "08:00", "activity": "Playground" } }
-  ]
+  "reply": "Added X items! ...",
+  "actions": [{ "type": "add_routine", "data": { "time": "07:00", "activity": "Breakfast" } }]
 }
 
 Rules:
-- Use "bulk" whenever the user provides 2 or more activities at once
-- For time ranges like "8:00–9:00", use the start time "08:00"
-- For activities without a clear time, make a reasonable estimate based on context
-- "add_routine" = repeats every day (master schedule); "add_schedule" = today only
-- Use "limitation" when the user asks for something the bot cannot do yet — fill data with a developer-ready feature suggestion
+- For general questions (weather, health tips, math, recipes, advice, etc.) — answer fully in "reply" using type "chat"
+- Use "limitation" ONLY when the user asks for an app feature that doesn't exist yet (not for general knowledge questions)
+- "add_routine" = repeats every day; "add_schedule" = today only
+- Use "bulk" for 2+ app actions at once
 - Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
     })
