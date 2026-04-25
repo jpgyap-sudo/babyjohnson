@@ -31,7 +31,7 @@ async function askClaude(message, senderName) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 800,
       system: `You are a helpful assistant in a family Telegram group for Baby Johnson, a 2-year-old toddler. You help with baby care questions, nutrition, health tips, development milestones, recipes, and general questions. You're warm, friendly, and concise — this is a chat, not an essay. You also help log food, vitamins, and schedule items for Johnson when asked directly.`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
@@ -51,7 +51,7 @@ async function parseMessageWithAI(message, photoCaption) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       messages: [{
         role: 'user',
