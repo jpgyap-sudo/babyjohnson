@@ -255,6 +255,27 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div class="card-title">Active reminders — sent via Telegram</div>
       <div id="reminder-list"><div class="empty-state">No reminders yet</div></div>
     </div>
+    <div class="card">
+      <div class="card-title">Activity-linked reminders</div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:.75rem">These fire automatically when a specific activity happens.</div>
+      <div class="input-row">
+        <input type="text" id="ctx-msg" placeholder="Reminder message (e.g. Eat with Johnson!)" style="flex:2">
+        <select id="ctx-trigger">
+          <option value="food">Any meal / eating</option>
+          <option value="Breakfast">Breakfast</option>
+          <option value="Lunch">Lunch</option>
+          <option value="Dinner">Dinner</option>
+          <option value="Nap">Nap</option>
+          <option value="Bath">Bath</option>
+          <option value="Shower">Shower</option>
+          <option value="School">School</option>
+          <option value="Sleep">Sleep</option>
+          <option value="Playground">Playground</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addContextReminder()" style="margin-bottom:.75rem">Add activity reminder</button>
+      <div id="ctx-reminder-list"><div class="empty-state">No activity reminders yet</div></div>
+    </div>
   </div>
 
   <!-- MEAL PLAN -->
@@ -470,7 +491,7 @@ function switchTab(tab, btn) {
   if(tab==='vitamins') loadVitamins();
   if(tab==='schedule') loadSchedule();
   if(tab==='calendar') renderCalendar();
-  if(tab==='reminders') loadReminders();
+  if(tab==='reminders') { loadReminders(); loadContextReminders(); }
   if(tab==='mealplan') loadMealPlan();
   if(tab==='routine') loadRoutine();
   if(tab==='activity') loadActivities();
@@ -669,6 +690,37 @@ async function loadReminders() {
     <input type="checkbox" class="reminder-active" ${r.active?'checked':''} onchange="toggleReminder('${r.id}',this.checked)" title="Active">
     <button class="btn btn-sm btn-danger" onclick="deleteReminder('${r.id}')">Remove</button>
   </div>`).join('');
+}
+
+async function loadContextReminders() {
+  const {data} = await sb.from('context_reminders').select('*').order('created_at',{ascending:false});
+  const el = document.getElementById('ctx-reminder-list');
+  if(!data?.length){el.innerHTML='<div class="empty-state">No activity reminders yet</div>';return;}
+  el.innerHTML = data.map(c=>`<div class="reminder-item">
+    <span class="reminder-time" style="min-width:80px;font-size:12px">${c.trigger==='food'?'Any meal':c.trigger}</span>
+    <span class="reminder-msg">${c.message}</span>
+    <input type="checkbox" class="reminder-active" ${c.active?'checked':''} onchange="toggleCtxReminder('${c.id}',this.checked)" title="Active">
+    <button class="btn btn-sm btn-danger" onclick="deleteCtxReminder('${c.id}')">Remove</button>
+  </div>`).join('');
+}
+
+async function addContextReminder() {
+  const msg = document.getElementById('ctx-msg').value.trim();
+  const trigger = document.getElementById('ctx-trigger').value;
+  if(!msg) return;
+  await sb.from('context_reminders').insert({trigger, message:msg, active:true});
+  document.getElementById('ctx-msg').value='';
+  loadContextReminders();
+}
+
+async function toggleCtxReminder(id, active) {
+  await sb.from('context_reminders').update({active}).eq('id',id);
+  loadContextReminders();
+}
+
+async function deleteCtxReminder(id) {
+  await sb.from('context_reminders').delete().eq('id',id);
+  loadContextReminders();
 }
 
 async function addReminder() {

@@ -119,23 +119,25 @@ Determine if it is:
   - schedule: a specific appointment or event
   - activity: anything else Johnson did (bath, brushing teeth, playing, sleeping, reading, going out, etc.)
   - preference: when someone mentions something Johnson likes/loves/enjoys OR hates/dislikes/doesn't like
+  - context_reminder: a suggestion to do something specific WHENEVER a particular activity happens (e.g. "please eat with johnson when he eats", "dim the lights when he naps", "play soft music during bath time")
 - A QUESTION asking about what Johnson did or likes:
   - query_food, query_vitamins, query_schedule, query_activity, query_preferences
 - UNRELATED (none) — general chat not about Johnson's care
 
-For preference: extract what he likes or dislikes and the category.
-For query_activity: extract the date reference.
-For query_preferences: extract pref_type (like/dislike/all) and category.
+For context_reminder: identify the trigger activity and the reminder message.
+  - trigger should be one of: "food" (any meal/eating), or a specific activity name like "Nap", "Bath", "Shower", "School", "Breakfast", "Lunch", "Dinner", "Sleep", "Playground"
+  - message should be a short, friendly reminder to send to the group
 
 Respond ONLY with valid JSON (no markdown):
 {
-  "type": "food" | "vitamin" | "schedule" | "activity" | "preference" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "query_preferences" | "none",
+  "type": "food" | "vitamin" | "schedule" | "activity" | "preference" | "context_reminder" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "query_preferences" | "none",
   "data": {
     // food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
     // vitamin: { "name": "...", "time": "HH:MM or null" }
     // schedule: { "activity": "...", "time": "HH:MM" }
     // activity: { "activity": "...", "time": "HH:MM or null", "notes": "..." }
     // preference: { "pref_type": "like" | "dislike", "item": "...", "category": "food|drink|activity|place|other" }
+    // context_reminder: { "trigger": "food|Nap|Bath|School|Breakfast|Lunch|Dinner|Sleep|...", "message": "reminder text to send the group" }
     // query_activity: { "date_ref": "today" | "yesterday" }
     // query_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
     // others: {}
@@ -179,6 +181,26 @@ export default async function handler(req, res) {
     const callbackChatId = callback.message?.chat?.id?.toString();
     const messageId = callback.message?.message_id;
     const responderName = callback.from?.first_name || 'Someone';
+
+    if (data.startsWith('ctx_yes_') || data.startsWith('ctx_no_')) {
+      const ctxId = data.startsWith('ctx_yes_') ? data.slice(8) : data.slice(7);
+      const confirmed = data.startsWith('ctx_yes_');
+      const { data: ctx } = await supabase.from('context_reminders').select('*').eq('id', ctxId).single();
+      if (ctx) {
+        if (confirmed) {
+          await supabase.from('context_reminders').update({ active: true }).eq('id', ctxId);
+          await answerCallback(callback.id, '✅ Reminder saved!');
+          await editMessage(callbackChatId, messageId,
+            `🔔 Got it! I'll remind everyone: _"${ctx.message}"_ whenever *${ctx.trigger === 'food' ? 'Johnson eats' : ctx.trigger + ' time'}* comes up.`
+          );
+        } else {
+          await supabase.from('context_reminders').delete().eq('id', ctxId);
+          await answerCallback(callback.id, 'OK, skipped!');
+          await editMessage(callbackChatId, messageId, `_OK, reminder not saved._`);
+        }
+      }
+      return res.status(200).send('OK');
+    }
 
     if (data.startsWith('suggest_y_') || data.startsWith('suggest_n_')) {
       const sugId = data.startsWith('suggest_y_') ? data.slice(10) : data.slice(10);
@@ -461,6 +483,9 @@ export default async function handler(req, res) {
       source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
+    // Fire context reminders for food
+    const { data: ctxFood } = await supabase.from('context_reminders').select('*').eq('trigger', 'food').eq('active', true);
+    for (const c of ctxFood || []) await sendTelegram(chatId, `🔔 *Reminder:* ${c.message}`);
   }
 
   else if (parsed.type === 'vitamin' && parsed.data?.name) {
@@ -482,6 +507,25 @@ export default async function handler(req, res) {
       source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `📅 ${parsed.confirmation}`);
+  }
+
+  else if (parsed.type === 'context_reminder' && parsed.data?.message) {
+    const trigger = parsed.data.trigger || 'food';
+    const { data: inserted } = await supabase.from('context_reminders').insert({
+      trigger,
+      message: parsed.data.message,
+      active: false
+    }).select().single();
+    if (inserted) {
+      const triggerLabel = trigger === 'food' ? 'Johnson eats' : `${trigger} time`;
+      await sendWithButtons(chatId,
+        `🔔 Got it! Want me to remind everyone:\n\n_"${parsed.data.message}"_\n\n...every time *${triggerLabel}*?`,
+        [[
+          { text: '✅ Yes, set this reminder', callback_data: `ctx_yes_${inserted.id}` },
+          { text: '❌ No thanks', callback_data: `ctx_no_${inserted.id}` }
+        ]]
+      );
+    }
   }
 
   else if (parsed.type === 'preference' && parsed.data?.item) {

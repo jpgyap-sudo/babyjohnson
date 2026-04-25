@@ -66,6 +66,17 @@ export default async function handler(req, res) {
       ]]
     );
 
+    // Fire context reminders matching this activity
+    const activityLower = s.activity.toLowerCase();
+    const { data: ctxReminders } = await supabase.from('context_reminders').select('*').eq('active', true);
+    for (const c of ctxReminders || []) {
+      const triggerLower = c.trigger.toLowerCase();
+      const isFoodActivity = ['breakfast','lunch','dinner','snack','meal','eat','milk'].some(w => activityLower.includes(w));
+      if (triggerLower === activityLower || (triggerLower === 'food' && isFoodActivity)) {
+        await sendTelegram(`🔔 *Reminder:* ${c.message}`);
+      }
+    }
+
     // Mark as notified (completed = null = pending response)
     await supabase.from('master_schedule_log').insert({
       master_schedule_id: s.id,
