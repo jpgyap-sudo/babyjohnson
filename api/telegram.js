@@ -107,6 +107,7 @@ async function sendDashboard(chatId) {
     })
   });
   const data = await res.json();
+  if (!data.ok) throw new Error(`TG: ${data.description || JSON.stringify(data)}`);
   return data?.result?.message_id;
 }
 
@@ -711,18 +712,25 @@ export default async function handler(req, res) {
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
+  // ── /test — verify the bot is alive and receiving commands ───
+  if (text.toLowerCase() === '/test' || text.toLowerCase().startsWith('/test@')) {
+    await sendTelegram(chatId, `✅ Bot alive! Received: "${text}" from ${senderName} (id: ${userId})`);
+    return res.status(200).send('OK');
+  }
+
   // ── /dashboard command — always first, nothing can block it ───
-  if (text.toLowerCase().startsWith('/dashboard')) {
-    clearConversationState(userId).catch(() => {});  // fire and forget
+  if (text.toLowerCase().startsWith('/dashboard') || text.toLowerCase().startsWith('/dashboard@')) {
+    clearConversationState(userId).catch(() => {});
     try {
       const messageId = await sendDashboard(chatId);
       if (messageId) {
-        // Pinning is optional — fire and forget, don't block
         fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: chatId, message_id: messageId, disable_notification: true })
         }).catch(() => {});
+      } else {
+        await sendTelegram(chatId, '⚠️ Dashboard sent but got no message_id back');
       }
     } catch (e) {
       await sendTelegram(chatId, `⚠️ Dashboard error: ${e.message}`).catch(() => {});
