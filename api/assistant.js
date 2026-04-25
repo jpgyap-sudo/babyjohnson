@@ -20,17 +20,27 @@ export default async function handler(req, res) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 400,
-      system: `You are an assistant for Baby Johnson's care schedule app. Today is ${today}, current time is ${nowTime}.
-You help add schedule items and reminders. Be concise and friendly.
+      max_tokens: 500,
+      system: `You are an AI assistant for Baby Johnson's care app. Today is ${today}, current time is ${nowTime}.
+
+You can perform any of these actions:
+- add_food: Log a food, drink, or snack entry for today
+- add_vitamin: Mark a vitamin as taken today
+- add_schedule: Add an activity to today's one-time schedule
+- add_reminder: Set a daily recurring reminder (sent via Telegram at a set time)
+- add_routine: Add to the master daily routine (repeats every day, sends Telegram notification)
+- chat: Answer questions about baby care, nutrition, development
 
 Respond ONLY with valid JSON (no markdown):
 {
-  "type": "add_schedule" | "add_reminder" | "chat",
-  "reply": "Short friendly message to show the user",
+  "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "chat",
+  "reply": "Short friendly confirmation or answer",
   "data": {
+    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM or null" }
+    // add_vitamin: { "name": "..." }
     // add_schedule: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // add_reminder: { "time": "HH:MM", "message": "..." }
+    // add_routine: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // chat: {}
   }
 }`,
@@ -49,20 +59,38 @@ Respond ONLY with valid JSON (no markdown):
     return res.status(200).json({ type: 'chat', reply: txt, data: {} });
   }
 
+  if (parsed.type === 'add_food' && parsed.data?.name) {
+    await supabase.from('food_logs').insert({
+      date: today, time: parsed.data.time || nowTime,
+      name: parsed.data.name, food_type: parsed.data.food_type || 'food',
+      portion: parsed.data.portion || '', source: 'app'
+    });
+  }
+
+  if (parsed.type === 'add_vitamin' && parsed.data?.name) {
+    await supabase.from('vitamin_logs').upsert({
+      date: today, vitamin_name: parsed.data.name,
+      taken: true, time_taken: nowTime, source: 'app'
+    }, { onConflict: 'date,vitamin_name' });
+  }
+
   if (parsed.type === 'add_schedule' && parsed.data?.time && parsed.data?.activity) {
     await supabase.from('schedule').insert({
-      time: parsed.data.time,
-      activity: parsed.data.activity,
-      color: parsed.data.color || '#7F77DD',
-      source: 'app'
+      time: parsed.data.time, activity: parsed.data.activity,
+      color: parsed.data.color || '#7F77DD', source: 'app'
     });
   }
 
   if (parsed.type === 'add_reminder' && parsed.data?.time && parsed.data?.message) {
     await supabase.from('reminders').insert({
-      time: parsed.data.time,
-      message: parsed.data.message,
-      active: true
+      time: parsed.data.time, message: parsed.data.message, active: true
+    });
+  }
+
+  if (parsed.type === 'add_routine' && parsed.data?.time && parsed.data?.activity) {
+    await supabase.from('master_schedule').insert({
+      time: parsed.data.time, activity: parsed.data.activity,
+      color: parsed.data.color || '#7F77DD', active: true
     });
   }
 

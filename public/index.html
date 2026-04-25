@@ -105,6 +105,15 @@ textarea{width:100%;min-height:64px;resize:vertical}
 .rec-badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;margin-right:4px;margin-bottom:4px;font-weight:500}
 .tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .loading{opacity:.5;pointer-events:none}
+/* Floating AI chat */
+.float-btn{position:fixed;bottom:22px;right:22px;width:52px;height:52px;border-radius:50%;background:#7F77DD;color:white;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(127,119,221,.45);z-index:200;display:flex;align-items:center;justify-content:center;transition:transform .15s}
+.float-btn:hover{transform:scale(1.08)}
+.float-panel{display:none;position:fixed;bottom:84px;right:22px;width:320px;max-width:calc(100vw - 44px);background:#fff;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.16);z-index:200;overflow:hidden;border:0.5px solid #e0ded6;flex-direction:column}
+.float-panel.open{display:flex}
+.chat-msg-user{text-align:right}
+.chat-msg-user span{background:#EEEDFE;color:#3C3489;padding:6px 12px;border-radius:10px 10px 2px 10px;display:inline-block;max-width:85%;font-size:13px;line-height:1.4}
+.chat-msg-bot span{background:#f1efe8;padding:6px 12px;border-radius:10px 10px 10px 2px;display:inline-block;max-width:85%;font-size:13px;line-height:1.4}
+.chat-msg-error span{background:#FCEBEB!important;color:#A32D2D!important}
 </style>
 </head>
 <body>
@@ -125,6 +134,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('calendar',this)">Calendar</button>
     <button class="nav-btn" onclick="switchTab('reminders',this)">Reminders</button>
     <button class="nav-btn" onclick="switchTab('mealplan',this)">Meal Plan</button>
+    <button class="nav-btn" onclick="switchTab('ai',this)">🤖 AI</button>
     <button class="nav-btn" onclick="switchTab('routine',this)">Routine</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
@@ -200,8 +210,8 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div class="card-title">AI assistant — schedule &amp; reminders</div>
       <div id="sched-chat-msgs" style="min-height:48px;max-height:200px;overflow-y:auto;margin-bottom:.5rem;font-size:13px;display:flex;flex-direction:column;gap:6px"></div>
       <div class="input-row">
-        <input type="text" id="sched-chat-input" placeholder='e.g. "Add bath time at 7pm" or "Remind me at 9am to give vitamin D"' style="flex:1" onkeydown="if(event.key==='Enter')sendSchedChat()">
-        <button class="btn btn-primary" onclick="sendSchedChat()">Ask</button>
+        <input type="text" id="sched-chat-input" placeholder='e.g. "Add bath time at 7pm" or "Remind me at 9am to give vitamin D"' style="flex:1" onkeydown="if(event.key==='Enter')sendChat('sched-chat-input','sched-chat-msgs')">
+        <button class="btn btn-primary" onclick="sendChat('sched-chat-input','sched-chat-msgs')">Ask</button>
       </div>
     </div>
   </div>
@@ -256,6 +266,19 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
     <div id="mealplan-content"></div>
     <div id="grocery-content"></div>
+  </div>
+
+  <!-- AI ASSISTANT TAB -->
+  <div id="tab-ai" class="section">
+    <div class="card" style="display:flex;flex-direction:column">
+      <div class="card-title">AI Assistant — Baby Johnson</div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:.75rem">Log food, add schedules, set reminders, ask anything about baby care.</div>
+      <div id="ai-msgs" style="min-height:320px;max-height:480px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:.75rem"></div>
+      <div class="input-row" style="margin-bottom:0">
+        <input type="text" id="ai-input" placeholder='e.g. "Log rice porridge for breakfast" or "Add bath at 7pm to routine"' style="flex:1" onkeydown="if(event.key==='Enter')sendChat('ai-input','ai-msgs')">
+        <button class="btn btn-primary" onclick="sendChat('ai-input','ai-msgs')">Send</button>
+      </div>
+    </div>
   </div>
 
   <!-- ROUTINE / MASTER SCHEDULE -->
@@ -326,6 +349,20 @@ textarea{width:100%;min-height:64px;resize:vertical}
   </div>
 </div>
 
+<!-- Floating AI chat button -->
+<button class="float-btn" onclick="toggleFloat()" title="AI Assistant">🤖</button>
+<div class="float-panel" id="float-panel">
+  <div style="background:#7F77DD;color:white;padding:11px 14px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+    <span style="font-weight:600;font-size:14px">🤖 AI Assistant</span>
+    <button onclick="toggleFloat()" style="background:none;border:none;color:white;cursor:pointer;font-size:20px;line-height:1;padding:0">✕</button>
+  </div>
+  <div id="float-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;min-height:160px;max-height:280px"></div>
+  <div style="padding:10px 12px;border-top:0.5px solid #eee;display:flex;gap:8px;flex-shrink:0">
+    <input type="text" id="float-input" placeholder="Log food, add schedule, ask anything..." style="flex:1;font-size:13px" onkeydown="if(event.key==='Enter')sendChat('float-input','float-msgs')">
+    <button class="btn btn-primary btn-sm" onclick="sendChat('float-input','float-msgs')">Send</button>
+  </div>
+</div>
+
 <script>
 // ── CONFIG ── Loaded from /api/config at runtime
 let sb;
@@ -357,6 +394,7 @@ function switchTab(tab, btn) {
   if(tab==='reminders') loadReminders();
   if(tab==='mealplan') loadMealPlan();
   if(tab==='routine') loadRoutine();
+  if(tab==='ai') {}
 }
 
 // ── FOOD LOG ──
@@ -696,26 +734,43 @@ function deleteSavedRecipe(i) {
   renderSavedRecipes();
 }
 
-async function sendSchedChat() {
-  const input = document.getElementById('sched-chat-input');
-  const msg = input.value.trim();
-  if(!msg) return;
-  input.value = '';
-  const msgs = document.getElementById('sched-chat-msgs');
-  msgs.innerHTML += `<div style="text-align:right"><span style="background:#EEEDFE;color:#3C3489;padding:5px 10px;border-radius:8px;display:inline-block">${msg}</span></div>`;
-  msgs.innerHTML += `<div><span style="background:#f1efe8;padding:5px 10px;border-radius:8px;display:inline-block;color:#888">Thinking...</span></div>`;
-  msgs.scrollTop = msgs.scrollHeight;
-  try {
-    const r = await fetch('/api/assistant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg})});
-    const d = await r.json();
-    msgs.lastElementChild.innerHTML = `<span style="background:#f1efe8;padding:5px 10px;border-radius:8px;display:inline-block">${d.reply||'Done!'}</span>`;
-    if(d.type==='add_schedule') loadSchedule();
-    if(d.type==='add_reminder') loadReminders();
-  } catch(e) {
-    msgs.lastElementChild.innerHTML = `<span style="background:#FCEBEB;color:#A32D2D;padding:5px 10px;border-radius:8px;display:inline-block">Error. Try again.</span>`;
-  }
-  msgs.scrollTop = msgs.scrollHeight;
+function toggleFloat() {
+  document.getElementById('float-panel').classList.toggle('open');
 }
+
+async function sendChat(inputId, msgsId) {
+  const inputEl = document.getElementById(inputId);
+  const msgsEl = document.getElementById(msgsId);
+  const msg = inputEl.value.trim();
+  if(!msg || !sb) return;
+  inputEl.value = '';
+  const userDiv = document.createElement('div');
+  userDiv.className = 'chat-msg-user';
+  userDiv.innerHTML = `<span>${msg.replace(/</g,'&lt;')}</span>`;
+  msgsEl.appendChild(userDiv);
+  const botDiv = document.createElement('div');
+  botDiv.className = 'chat-msg-bot';
+  botDiv.innerHTML = '<span style="color:#aaa">Thinking...</span>';
+  msgsEl.appendChild(botDiv);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  try {
+    const r = await fetch('/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+    const d = await r.json();
+    botDiv.innerHTML = `<span>${(d.reply||'Done!').replace(/</g,'&lt;')}</span>`;
+    const active = t => document.getElementById('tab-'+t)?.classList.contains('active');
+    if(d.type==='add_food' && active('food')) loadFoods();
+    if(d.type==='add_schedule' && active('schedule')) loadSchedule();
+    if(d.type==='add_reminder' && active('reminders')) loadReminders();
+    if(d.type==='add_routine' && active('routine')) loadRoutine();
+    if(d.type==='add_vitamin' && active('vitamins')) loadVitamins();
+  } catch(e) {
+    botDiv.className = 'chat-msg-bot chat-msg-error';
+    botDiv.innerHTML = '<span>Error. Try again.</span>';
+  }
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+function sendSchedChat() { sendChat('sched-chat-input','sched-chat-msgs'); }
 
 // ── ROUTINE / MASTER SCHEDULE ──
 async function loadRoutine() {
