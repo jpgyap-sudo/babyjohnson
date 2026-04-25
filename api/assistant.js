@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
 Single action:
 {
-  "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "chat",
+  "type": "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "show_schedule" | "show_food" | "show_vitamins" | "show_routine" | "chat",
   "reply": "Short friendly confirmation or answer",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
@@ -33,6 +33,7 @@ Single action:
     // add_schedule: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
     // add_reminder: { "time": "HH:MM", "message": "..." }
     // add_routine: { "time": "HH:MM", "activity": "...", "color": "#7F77DD" }
+    // show_*: {}
     // chat: {}
   }
 }
@@ -51,6 +52,10 @@ Rules:
 - For time ranges like "8:00–9:00", use start time "08:00"
 - For activities with no time, make a reasonable estimate from context
 - "add_routine" = repeats every day; "add_schedule" = today only
+- Use show_schedule when asked about today's schedule or what's planned
+- Use show_routine when asked about the master/daily routine
+- Use show_food when asked what Johnson ate today
+- Use show_vitamins when asked about vitamins today
 - Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: message }]
     })
@@ -123,6 +128,45 @@ Rules:
       time: parsed.data.time, activity: parsed.data.activity,
       color: parsed.data.color || '#7F77DD', active: true
     });
+  }
+
+  if (parsed.type === 'show_schedule') {
+    const [{ data: sched }, { data: routine }] = await Promise.all([
+      supabase.from('schedule').select('*').eq('date', today).order('time'),
+      supabase.from('master_schedule').select('*').eq('active', true).order('time')
+    ]);
+    const allItems = [
+      ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
+      ...(sched || []).map(s => ({ time: s.time, activity: s.activity }))
+    ].sort((a, b) => a.time.localeCompare(b.time));
+    const reply = allItems.length
+      ? `📋 Johnson's schedule today:\n\n${allItems.map(s => `• ${s.time} — ${s.activity}`).join('\n')}`
+      : 'No schedule items for today!';
+    return res.status(200).json({ type: 'show_schedule', reply });
+  }
+
+  if (parsed.type === 'show_routine') {
+    const { data: routine } = await supabase.from('master_schedule').select('*').eq('active', true).order('time');
+    const reply = routine?.length
+      ? `📋 Johnson's daily routine:\n\n${routine.map(r => `• ${r.time} — ${r.activity}`).join('\n')}`
+      : 'No routine items set yet!';
+    return res.status(200).json({ type: 'show_routine', reply });
+  }
+
+  if (parsed.type === 'show_food') {
+    const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
+    const reply = foods?.length
+      ? `🍽️ Johnson's food today:\n\n${foods.map(f => `• ${f.time || '?'} — ${f.name}${f.portion ? ' (' + f.portion + ')' : ''}`).join('\n')}`
+      : "Nothing logged for Johnson today yet!";
+    return res.status(200).json({ type: 'show_food', reply });
+  }
+
+  if (parsed.type === 'show_vitamins') {
+    const { data: vits } = await supabase.from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
+    const reply = vits?.length
+      ? `💊 Johnson's vitamins today:\n\n${vits.map(v => `✅ ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n')}`
+      : 'No vitamins logged for today!';
+    return res.status(200).json({ type: 'show_vitamins', reply });
   }
 
   return res.status(200).json(parsed);
