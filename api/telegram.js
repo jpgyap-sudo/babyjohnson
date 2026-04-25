@@ -22,6 +22,14 @@ async function sendTelegram(chatId, text) {
   });
 }
 
+async function sendWithButtons(chatId, text, inlineKeyboard) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } })
+  });
+}
+
 async function handleMention(message, senderName, today, nowTime) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -37,7 +45,7 @@ async function handleMention(message, senderName, today, nowTime) {
 
 Single actions — respond with:
 {
-  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity",
+  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences",
   "reply": "...",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
@@ -46,6 +54,7 @@ Single actions — respond with:
     // add_routine: { "time": "HH:MM", "activity": "..." }
     // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
     // show_activity: { "date_ref": "today" | "yesterday" }
+    // show_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
     // others: {}
   }
 }
@@ -105,22 +114,27 @@ Determine if it is:
   - vitamin: taking a vitamin or supplement
   - schedule: a specific appointment or event
   - activity: anything else Johnson did (bath, brushing teeth, playing, sleeping, reading, going out, etc.)
-- A QUESTION asking about what Johnson did (query_food, query_vitamins, query_schedule, query_activity)
+  - preference: when someone mentions something Johnson likes/loves/enjoys OR hates/dislikes/doesn't like
+- A QUESTION asking about what Johnson did or likes:
+  - query_food, query_vitamins, query_schedule, query_activity, query_preferences
 - UNRELATED (none) — general chat not about Johnson's care
 
-For query_activity, extract the date reference from the message.
+For preference: extract what he likes or dislikes and the category.
+For query_activity: extract the date reference.
+For query_preferences: extract pref_type (like/dislike/all) and category.
 
 Respond ONLY with valid JSON (no markdown):
 {
-  "type": "food" | "vitamin" | "schedule" | "activity" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "none",
+  "type": "food" | "vitamin" | "schedule" | "activity" | "preference" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "query_preferences" | "none",
   "data": {
     // food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
     // vitamin: { "name": "...", "time": "HH:MM or null" }
     // schedule: { "activity": "...", "time": "HH:MM" }
     // activity: { "activity": "...", "time": "HH:MM or null", "notes": "..." }
+    // preference: { "pref_type": "like" | "dislike", "item": "...", "category": "food|drink|activity|place|other" }
     // query_activity: { "date_ref": "today" | "yesterday" }
-    // query_*: {}
-    // none: {}
+    // query_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
+    // others: {}
   },
   "confirmation": "Short friendly confirmation (for log entries only, null for queries/none)"
 }`
@@ -161,6 +175,27 @@ export default async function handler(req, res) {
     const callbackChatId = callback.message?.chat?.id?.toString();
     const messageId = callback.message?.message_id;
     const responderName = callback.from?.first_name || 'Someone';
+
+    if (data.startsWith('pref_yes_') || data.startsWith('pref_no_')) {
+      const prefId = data.startsWith('pref_yes_') ? data.slice(9) : data.slice(8);
+      const confirmed = data.startsWith('pref_yes_');
+
+      const { data: pref } = await supabase.from('johnson_preferences').select('*').eq('id', prefId).single();
+      if (pref) {
+        if (confirmed) {
+          await supabase.from('johnson_preferences').update({ status: 'confirmed' }).eq('id', prefId);
+          await answerCallback(callback.id, '✅ Added to Johnson\'s preferences!');
+          await editMessage(callbackChatId, messageId,
+            `${pref.pref_type === 'like' ? '💛' : '🚫'} Got it! *${pref.item}* added to Johnson's ${pref.pref_type === 'like' ? 'favorites' : 'dislikes'}!`
+          );
+        } else {
+          await supabase.from('johnson_preferences').update({ status: 'rejected' }).eq('id', prefId);
+          await answerCallback(callback.id, 'OK, skipped!');
+          await editMessage(callbackChatId, messageId, `_Skipped — not logged._`);
+        }
+      }
+      return res.status(200).send('OK');
+    }
 
     if (data.startsWith('done_') || data.startsWith('skip_')) {
       const firstUnder = data.indexOf('_');
@@ -303,6 +338,26 @@ export default async function handler(req, res) {
       return res.status(200).send('OK');
     }
 
+    if (action.type === 'show_preferences') {
+      const prefType = action.data?.pref_type || 'all';
+      const category = action.data?.category || 'all';
+      let query = supabase.from('johnson_preferences').select('*').eq('status', 'confirmed').order('created_at');
+      if (prefType !== 'all') query = query.eq('pref_type', prefType);
+      if (category !== 'all') query = query.eq('category', category);
+      const { data: prefs } = await query;
+      if (!prefs?.length) {
+        await sendTelegram(chatId, `No ${prefType === 'all' ? '' : prefType + 's '}logged for Johnson yet!`);
+      } else {
+        const likes = prefs.filter(p => p.pref_type === 'like');
+        const dislikes = prefs.filter(p => p.pref_type === 'dislike');
+        let msg = `💛 *Johnson's preferences:*\n`;
+        if (likes.length) msg += `\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+        if (dislikes.length) msg += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+        await sendTelegram(chatId, msg);
+      }
+      return res.status(200).send('OK');
+    }
+
     if (action.type === 'add_activity' && action.data?.activity) {
       await supabase.from('activity_logs').insert({
         date: today,
@@ -388,6 +443,26 @@ export default async function handler(req, res) {
     if (parsed.confirmation) await sendTelegram(chatId, `📅 ${parsed.confirmation}`);
   }
 
+  else if (parsed.type === 'preference' && parsed.data?.item) {
+    const { data: inserted } = await supabase.from('johnson_preferences').insert({
+      pref_type: parsed.data.pref_type || 'like',
+      category: parsed.data.category || 'food',
+      item: parsed.data.item,
+      status: 'pending'
+    }).select().single();
+    if (inserted) {
+      const emoji = parsed.data.pref_type === 'dislike' ? '🚫' : '💛';
+      const label = parsed.data.pref_type === 'dislike' ? 'dislike' : 'favorite';
+      await sendWithButtons(chatId,
+        `${emoji} It sounds like Johnson *${parsed.data.pref_type === 'dislike' ? "doesn't like" : 'loves'}* *${parsed.data.item}*!\n\nWant me to add that to his ${label} log?`,
+        [[
+          { text: `✅ Yes, add to ${label}s`, callback_data: `pref_yes_${inserted.id}` },
+          { text: '❌ No thanks', callback_data: `pref_no_${inserted.id}` }
+        ]]
+      );
+    }
+  }
+
   else if (parsed.type === 'activity' && parsed.data?.activity) {
     await supabase.from('activity_logs').insert({
       date: today,
@@ -421,6 +496,25 @@ export default async function handler(req, res) {
     } else {
       const list = vits.map(v => `✅ ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n');
       await sendTelegram(chatId, `💊 *Johnson's vitamins today:*\n\n${list}`);
+    }
+  }
+
+  else if (parsed.type === 'query_preferences') {
+    const prefType = parsed.data?.pref_type || 'all';
+    const category = parsed.data?.category || 'all';
+    let query = supabase.from('johnson_preferences').select('*').eq('status', 'confirmed').order('created_at');
+    if (prefType !== 'all') query = query.eq('pref_type', prefType);
+    if (category !== 'all') query = query.eq('category', category);
+    const { data: prefs } = await query;
+    if (!prefs?.length) {
+      await sendTelegram(chatId, `No preferences logged for Johnson yet! Try saying something like "Johnson loves chicken" or "Johnson doesn't like bitter melon".`);
+    } else {
+      const likes = prefs.filter(p => p.pref_type === 'like');
+      const dislikes = prefs.filter(p => p.pref_type === 'dislike');
+      let msg = `💛 *Johnson's preferences:*`;
+      if (likes.length) msg += `\n\n*Loves:*\n${likes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+      if (dislikes.length) msg += `\n\n*Doesn't like:*\n${dislikes.map(p => `• ${p.item} _(${p.category})_`).join('\n')}`;
+      await sendTelegram(chatId, msg);
     }
   }
 

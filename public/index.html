@@ -137,6 +137,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('ai',this)">🤖 AI</button>
     <button class="nav-btn" onclick="switchTab('routine',this)">Routine</button>
     <button class="nav-btn" onclick="switchTab('activity',this)">Activity Log</button>
+    <button class="nav-btn" onclick="switchTab('prefs',this)">💛 Likes</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
     <button class="nav-btn" onclick="switchTab('insights',this)">💡 Insights</button>
@@ -336,6 +337,36 @@ textarea{width:100%;min-height:64px;resize:vertical}
     </div>
   </div>
 
+  <!-- PREFERENCES -->
+  <div id="tab-prefs" class="section">
+    <div class="card">
+      <div class="card-title">Add manually</div>
+      <div class="input-row">
+        <input type="text" id="pref-item" placeholder="e.g. Chicken rice, Bitter melon, Playground" style="flex:2">
+        <select id="pref-type">
+          <option value="like">Likes 💛</option>
+          <option value="dislike">Dislikes 🚫</option>
+        </select>
+        <select id="pref-cat">
+          <option value="food">Food</option>
+          <option value="drink">Drink</option>
+          <option value="activity">Activity</option>
+          <option value="place">Place</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addPref()">Add preference</button>
+    </div>
+    <div class="card">
+      <div class="card-title">💛 Johnson loves</div>
+      <div id="pref-likes"><div class="empty-state">Nothing logged yet</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🚫 Johnson doesn't like</div>
+      <div id="pref-dislikes"><div class="empty-state">Nothing logged yet</div></div>
+    </div>
+  </div>
+
   <!-- FOOD GUIDE -->
   <div id="tab-foodguide" class="section">
     <div class="card">
@@ -443,6 +474,7 @@ function switchTab(tab, btn) {
   if(tab==='mealplan') loadMealPlan();
   if(tab==='routine') loadRoutine();
   if(tab==='activity') loadActivities();
+  if(tab==='prefs') loadPrefs();
   if(tab==='ai') {}
   if(tab==='insights') loadInsights();
 }
@@ -879,6 +911,40 @@ async function toggleRoutine(id,active) {
 async function deleteRoutine(id) {
   await sb.from('master_schedule').delete().eq('id',id);
   loadRoutine();
+}
+
+// ── PREFERENCES ──
+async function loadPrefs() {
+  const {data} = await sb.from('johnson_preferences').select('*').eq('status','confirmed').order('created_at',{ascending:false});
+  const likes = (data||[]).filter(p=>p.pref_type==='like');
+  const dislikes = (data||[]).filter(p=>p.pref_type==='dislike');
+  const catEmoji = {food:'🍽️',drink:'🥤',activity:'🎮',place:'📍',other:'•'};
+  const render = (items, elId) => {
+    const el = document.getElementById(elId);
+    if(!items.length){el.innerHTML='<div class="empty-state">Nothing logged yet</div>';return;}
+    el.innerHTML = items.map(p=>`<div class="log-item">
+      <span style="font-size:16px;min-width:24px">${catEmoji[p.category]||'•'}</span>
+      <div style="flex:1"><div class="log-name">${p.item}</div><div class="log-sub">${p.category}</div></div>
+      <button class="btn btn-sm btn-danger" onclick="deletePref('${p.id}')">Remove</button>
+    </div>`).join('');
+  };
+  render(likes,'pref-likes');
+  render(dislikes,'pref-dislikes');
+}
+
+async function addPref() {
+  const item = document.getElementById('pref-item').value.trim();
+  const pref_type = document.getElementById('pref-type').value;
+  const category = document.getElementById('pref-cat').value;
+  if(!item) return;
+  await sb.from('johnson_preferences').insert({pref_type, category, item, status:'confirmed'});
+  document.getElementById('pref-item').value='';
+  loadPrefs();
+}
+
+async function deletePref(id) {
+  await sb.from('johnson_preferences').delete().eq('id',id);
+  loadPrefs();
 }
 
 // ── ACTIVITY LOG ──
