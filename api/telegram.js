@@ -203,8 +203,9 @@ export default async function handler(req, res) {
   const text = msg.text || '';
   const caption = msg.caption || '';
   const hasPhoto = !!msg.photo;
-  const today = new Date().toISOString().slice(0, 10);
-  const nowTime = new Date().toTimeString().slice(0, 5);
+  const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const today = pht.toISOString().slice(0, 10);
+  const nowTime = pht.toISOString().slice(11, 16);
   const senderName = msg.from?.first_name || 'Someone';
 
   if (chatId !== GROUP_ID) return res.status(200).send('OK');

@@ -25,9 +25,9 @@ async function sendWithButtons(text, inlineKeyboard) {
 }
 
 export default async function handler(req, res) {
-  const now = new Date();
-  const hhmm = now.toTimeString().slice(0, 5);
-  const today = now.toISOString().slice(0, 10);
+  const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const hhmm = pht.toISOString().slice(11, 16);
+  const today = pht.toISOString().slice(0, 10);
 
   // Regular reminders
   const { data: reminders } = await supabase

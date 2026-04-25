@@ -60,7 +60,7 @@ Respond ONLY with a valid JSON object (no markdown):
   try { plan = JSON.parse(txt.replace(/```json|```/g, '').trim()); }
   catch { return res.status(500).json({ error: 'Parse failed' }); }
 
-  const now = new Date();
+  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
   const monday = new Date(now);
   monday.setDate(now.getDate() - now.getDay() + 1);
   plan.week_start = monday.toISOString().slice(0, 10);

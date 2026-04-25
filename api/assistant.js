@@ -8,8 +8,9 @@ export default async function handler(req, res) {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Missing message' });
 
-  const today = new Date().toISOString().slice(0, 10);
-  const nowTime = new Date().toTimeString().slice(0, 5);
+  const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const today = pht.toISOString().slice(0, 10);
+  const nowTime = pht.toISOString().slice(11, 16);
   const msgLower = message.toLowerCase();
 
   // Detect query intent directly — don't rely on Claude for these

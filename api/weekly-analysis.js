@@ -13,8 +13,9 @@ async function sendTelegram(text) {
 }
 
 export default async function handler(req, res) {
-  const today = new Date().toISOString().slice(0, 10);
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const today = pht.toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() + 8 * 60 * 60 * 1000 - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const [
     { data: foods },
