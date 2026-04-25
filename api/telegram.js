@@ -293,11 +293,18 @@ export default async function handler(req, res) {
     }
 
     if (action.type === 'show_schedule') {
-      const { data: sched } = await supabase.from('schedule').select('*').eq('date', today).order('time');
-      if (!sched?.length) {
+      const [{ data: sched }, { data: routine }] = await Promise.all([
+        supabase.from('schedule').select('*').eq('date', today).order('time'),
+        supabase.from('master_schedule').select('*').eq('active', true).order('time')
+      ]);
+      const allItems = [
+        ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
+        ...(sched || []).map(s => ({ time: s.time, activity: s.activity + ' _(today only)_' }))
+      ].sort((a, b) => a.time.localeCompare(b.time));
+      if (!allItems.length) {
         await sendTelegram(chatId, "No schedule items for today! 📅");
       } else {
-        const list = sched.map(s => `• ${s.time} — ${s.activity}`).join('\n');
+        const list = allItems.map(s => `• ${s.time} — ${s.activity}`).join('\n');
         await sendTelegram(chatId, `📋 *Johnson's schedule today:*\n\n${list}`);
       }
       return res.status(200).send('OK');
@@ -370,12 +377,18 @@ export default async function handler(req, res) {
   }
 
   else if (parsed.type === 'query_schedule') {
-    const { data: sched } = await supabase
-      .from('schedule').select('*').eq('date', today).order('time');
-    if (!sched?.length) {
+    const [{ data: sched }, { data: routine }] = await Promise.all([
+      supabase.from('schedule').select('*').eq('date', today).order('time'),
+      supabase.from('master_schedule').select('*').eq('active', true).order('time')
+    ]);
+    const allItems = [
+      ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
+      ...(sched || []).map(s => ({ time: s.time, activity: s.activity }))
+    ].sort((a, b) => a.time.localeCompare(b.time));
+    if (!allItems.length) {
       await sendTelegram(chatId, "No schedule items logged for Johnson today! 📅");
     } else {
-      const list = sched.map(s => `• ${s.time} — ${s.activity}`).join('\n');
+      const list = allItems.map(s => `• ${s.time} — ${s.activity}`).join('\n');
       await sendTelegram(chatId, `📅 *Johnson's schedule today:*\n\n${list}`);
     }
   }
