@@ -227,3 +227,28 @@ Before shipping any skill:
 - [ ] For multi-step: is there a 10-minute expiry on stuck states?
 - [ ] For cron: is the UTC equivalent of the local time correct?
 - [ ] Is there a `/api/debug` endpoint to verify the skill works in production?
+
+---
+
+## Self-Improvement Protocol
+
+This file grows every session. After any session where a new skill type is built or a pattern is discovered:
+
+### When to update this file
+| Trigger | What to add |
+|---|---|
+| New skill category built (not in the table) | Add row to Skill Categories table |
+| New button flow pattern used | Add to Interactive Skill section |
+| New cron pattern or UTC gotcha | Add to Scheduled Skill section |
+| New learning/profile category discovered | Add to profile categories list |
+| Skill checklist item missed and caused a bug | Add the item to Skill Checklist |
+| Better fast-path regex pattern found | Update Fast-Path Skill example |
+
+### How to update
+At the end of a session where new skills were built, check each skill against the existing patterns:
+- Is there a pattern here that should be reusable?
+- Did the checklist catch everything, or did something slip through?
+- Was a new skill category invented that belongs in the table?
+
+Edit inline — don't create new sections for single patterns, add to existing ones.
+Commit with: `Update skills.md — [what changed]`

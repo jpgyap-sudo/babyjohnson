@@ -319,3 +319,33 @@ Copy and work through this for every new app:
 | `/dashboard` logs "/dashboard" as food | State intercepts command text | Check commands before conversation state |
 | Pinning blocks dashboard | `await` on optional operation | Make pinning fire-and-forget |
 | Old code still running | Deployment failed silently | Check `/api/debug` returns latest format |
+
+---
+
+## Self-Improvement Protocol
+
+This file grows every session. The Lessons Learned table and checklists are the living record of everything that went wrong and how to prevent it.
+
+### When to update this file
+| Trigger | What to add |
+|---|---|
+| New bug fixed | Add row to Lessons Learned table |
+| Deployment step missed or gotcha hit | Add to deployment checklist |
+| New app built with a different architecture | Update Standard App Architecture diagram |
+| Debug step that wasn't in the checklist caught the issue | Add to the debug checklist |
+| New tool or service added to the stack | Update Standard File Structure + MCP Setup |
+| New app checklist item discovered | Add to New App Checklist |
+
+### How to update
+At session end, run through what happened:
+1. Did anything break that a checklist item would have caught?
+2. Was there a debugging step that isn't in the "Bot not responding" checklist?
+3. Did a deployment step fail that should be documented?
+
+Add one-line rows to the Lessons Learned table. Don't write paragraphs.
+Commit with: `Update workflow.md — [what was learned]`
+
+### Self-improvement is non-negotiable
+The guides must be smarter after every session than before.
+If nothing was added: either the session was trivial (no new patterns), or the update was skipped.
+Skipping the update is the only way these guides stop being useful.

@@ -289,3 +289,28 @@ Always include `/api/debug` in every app. It should check:
 2. DB connectivity + table existence
 3. External service identity (e.g. Telegram `getMe`)
 4. Attempt to send a test message to the target channel
+
+---
+
+## Self-Improvement Protocol
+
+This file grows every session. After any session where a new agent pattern is discovered or a bug is fixed:
+
+### When to update this file
+| Trigger | What to add |
+|---|---|
+| New Claude API behavior discovered | Add to "Claude API Call Pattern" section |
+| New JSON schema variant needed | Add to "JSON Action Schema" |
+| New Telegram API pattern used | Add to "Telegram Bot Patterns" |
+| New Supabase pattern used | Add to "Supabase Patterns" |
+| Bug caused by wrong agent handler order | Add to handler order section with note |
+| New MCP tool connected | Update capability map in CLAUDE.md |
+
+### How to update
+After the session's main work is done, run through what was built and ask:
+- Did I hit a pattern not in this file?
+- Did I hit a bug caused by a gap in this file?
+- Is there a cleaner way to express an existing pattern?
+
+Then edit inline — no new sections for minor additions, add to the right existing section.
+Commit with: `Update agents.md — [what changed]`
