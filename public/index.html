@@ -138,6 +138,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('routine',this)">Routine</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
+    <button class="nav-btn" onclick="switchTab('insights',this)">💡 Insights</button>
   </div>
 
   <!-- FOOD LOG -->
@@ -347,6 +348,20 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div class="rec-item"><h3>Yogurt &amp; fruit bowl</h3><p>Full-fat plain yogurt with mashed ripe mango or banana. No sugar needed — naturally sweet and packed with calcium.</p></div>
     </div>
   </div>
+
+  <!-- INSIGHTS -->
+  <div id="tab-insights" class="section">
+    <div class="card">
+      <div class="card-title">Johnson's learned profile</div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:.75rem">Facts the bot has learned from weekly pattern analysis. Updates every Sunday.</div>
+      <div id="profile-list"><div class="empty-state">No profile data yet — runs automatically every Sunday.</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">App improvement suggestions</div>
+      <div style="font-size:12px;color:#aaa;margin-bottom:.75rem">Bot recommendations based on actual care patterns. Mark as implemented once done.</div>
+      <div id="suggestions-list"><div class="empty-state">No suggestions yet.</div></div>
+    </div>
+  </div>
 </div>
 
 <!-- Floating AI chat button -->
@@ -395,6 +410,7 @@ function switchTab(tab, btn) {
   if(tab==='mealplan') loadMealPlan();
   if(tab==='routine') loadRoutine();
   if(tab==='ai') {}
+  if(tab==='insights') loadInsights();
 }
 
 // ── FOOD LOG ──
@@ -829,6 +845,70 @@ async function toggleRoutine(id,active) {
 async function deleteRoutine(id) {
   await sb.from('master_schedule').delete().eq('id',id);
   loadRoutine();
+}
+
+// ── INSIGHTS ──
+async function loadInsights() {
+  const [{data:profile},{data:suggestions}] = await Promise.all([
+    sb.from('johnson_profile').select('*').order('updated_at',{ascending:false}),
+    sb.from('app_suggestions').select('*').order('created_at',{ascending:false})
+  ]);
+
+  const profileEl = document.getElementById('profile-list');
+  if(!profile?.length){
+    profileEl.innerHTML='<div class="empty-state">No profile data yet — runs automatically every Sunday.</div>';
+  } else {
+    const catColors={food_preference:['#EAF3DE','#3B6D11'],sleep_pattern:['#E6F1FB','#185FA5'],behavior:['#FAEEDA','#854F0B'],health:['#FCEBEB','#A32D2D'],routine:['#EEEDFE','#534AB7'],development:['#e1f5ee','#0f6e56']};
+    const catLabels={food_preference:'Food Preferences',sleep_pattern:'Sleep Patterns',behavior:'Behavior',health:'Health',routine:'Routine',development:'Development'};
+    const grouped={};
+    profile.forEach(p=>{if(!grouped[p.category])grouped[p.category]=[];grouped[p.category].push(p);});
+    profileEl.innerHTML=Object.entries(grouped).map(([cat,facts])=>{
+      const [bg,fg]=catColors[cat]||['#f1efe8','#888780'];
+      return `<div style="margin-bottom:.85rem">
+        <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">${catLabels[cat]||cat}</div>
+        ${facts.map(f=>`<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:.35rem">
+          <span class="badge" style="background:${bg};color:${fg};flex-shrink:0">${f.confidence||'medium'}</span>
+          <span style="font-size:13px;line-height:1.4">${f.fact}</span>
+        </div>`).join('')}
+      </div>`;
+    }).join('');
+  }
+
+  const sugEl=document.getElementById('suggestions-list');
+  if(!suggestions?.length){sugEl.innerHTML='<div class="empty-state">No suggestions yet.</div>';return;}
+  const pending=suggestions.filter(s=>s.status==='pending');
+  const resolved=suggestions.filter(s=>s.status!=='pending');
+  const priStyle={high:'background:#FCEBEB;color:#A32D2D',medium:'background:#FAEEDA;color:#854F0B',low:'background:#f1efe8;color:#888780'};
+  let html='';
+  if(pending.length){
+    html+=pending.map(s=>`<div style="padding:.75rem 0;border-bottom:.5px solid #eee">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:.4rem">
+        <span class="badge" style="${priStyle[s.priority]||priStyle.low};flex-shrink:0">${s.priority}</span>
+        <span style="font-size:13px;font-weight:500">${s.title}</span>
+      </div>
+      <div style="font-size:12px;color:#666;margin-bottom:.3rem;line-height:1.5">${s.description}</div>
+      <div style="font-size:11px;color:#aaa;font-style:italic;margin-bottom:.5rem">Why: ${s.reason||''}</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-primary" onclick="updateSuggestion('${s.id}','implemented')">✅ Implemented</button>
+        <button class="btn btn-sm" onclick="updateSuggestion('${s.id}','dismissed')" style="color:#aaa">Dismiss</button>
+      </div>
+    </div>`).join('');
+  } else {
+    html+='<div style="font-size:13px;color:#aaa;padding:.5rem 0">No pending suggestions.</div>';
+  }
+  if(resolved.length){
+    html+=`<div style="margin-top:.75rem"><div style="font-size:11px;color:#ccc;margin-bottom:.35rem">RESOLVED (${resolved.length})</div>
+    ${resolved.map(s=>`<div style="display:flex;gap:8px;padding:.3rem 0;opacity:.55">
+      <span style="font-size:12px;${s.status==='implemented'?'color:#3B6D11':'color:#ccc'}">${s.status==='implemented'?'✅':'✕'}</span>
+      <span style="font-size:12px;color:#888">${s.title}</span>
+    </div>`).join('')}</div>`;
+  }
+  sugEl.innerHTML=html;
+}
+
+async function updateSuggestion(id,status){
+  await sb.from('app_suggestions').update({status}).eq('id',id);
+  loadInsights();
 }
 
 // ── INIT LOAD ──

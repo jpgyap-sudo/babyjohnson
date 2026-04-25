@@ -3,6 +3,10 @@
     {
       "path": "/api/mealplan",
       "schedule": "0 7 * * 1"
+    },
+    {
+      "path": "/api/weekly-analysis",
+      "schedule": "0 12 * * 0"
     }
   ]
 }
