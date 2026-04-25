@@ -45,7 +45,7 @@ async function handleMention(message, senderName, today, nowTime) {
 
 Single actions — respond with:
 {
-  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences",
+  "type": "chat" | "limitation" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences",
   "reply": "...",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
@@ -55,6 +55,7 @@ Single actions — respond with:
     // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
     // show_activity: { "date_ref": "today" | "yesterday" }
     // show_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
+    // limitation: { "title": "short feature name", "description": "what the user wants the app to do", "reason": "what pattern or need triggered this" }
     // others: {}
   }
 }
@@ -74,6 +75,7 @@ Rules:
 - For time ranges like "8:00–9:00", use the start time "08:00"
 - For activities without a clear time, make a reasonable estimate based on context
 - "add_routine" = repeats every day (master schedule); "add_schedule" = today only
+- Use "limitation" when the user asks for something the bot cannot do yet — fill data with a developer-ready feature suggestion
 - Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
     })
@@ -175,6 +177,21 @@ export default async function handler(req, res) {
     const callbackChatId = callback.message?.chat?.id?.toString();
     const messageId = callback.message?.message_id;
     const responderName = callback.from?.first_name || 'Someone';
+
+    if (data.startsWith('suggest_y_') || data.startsWith('suggest_n_')) {
+      const sugId = data.startsWith('suggest_y_') ? data.slice(10) : data.slice(10);
+      const confirmed = data.startsWith('suggest_y_');
+      if (confirmed) {
+        await supabase.from('app_suggestions').update({ status: 'pending' }).eq('id', sugId);
+        await answerCallback(callback.id, '✅ Added to recommendations!');
+        await editMessage(callbackChatId, messageId, `💡 Got it! Added to the app recommendations. The developer will review it soon.`);
+      } else {
+        await supabase.from('app_suggestions').delete().eq('id', sugId);
+        await answerCallback(callback.id, 'OK, skipped!');
+        await editMessage(callbackChatId, messageId, `_OK, skipped._`);
+      }
+      return res.status(200).send('OK');
+    }
 
     if (data.startsWith('pref_yes_') || data.startsWith('pref_no_')) {
       const prefId = data.startsWith('pref_yes_') ? data.slice(9) : data.slice(8);
@@ -398,6 +415,28 @@ export default async function handler(req, res) {
       } else {
         const list = allItems.map(s => `• ${s.time} — ${s.activity}`).join('\n');
         await sendTelegram(chatId, `📋 *Johnson's schedule today:*\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+
+    if (action.type === 'limitation') {
+      await sendTelegram(chatId, action.reply || "I can't do that yet!");
+      const { data: inserted } = await supabase.from('app_suggestions').insert({
+        priority: 'medium',
+        category: 'new_feature',
+        title: action.data?.title || 'Feature request from chat',
+        description: action.data?.description || action.reply || '',
+        reason: action.data?.reason || `Requested by ${senderName} in group chat`,
+        status: 'draft'
+      }).select().single();
+      if (inserted) {
+        await sendWithButtons(chatId,
+          `💡 Want me to add *"${action.data?.title || 'this feature'}"* to the app recommendations for the next update?`,
+          [[
+            { text: '✅ Yes, recommend it', callback_data: `suggest_y_${inserted.id}` },
+            { text: '❌ No thanks', callback_data: `suggest_n_${inserted.id}` }
+          ]]
+        );
       }
       return res.status(200).send('OK');
     }
