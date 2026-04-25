@@ -13,6 +13,21 @@ async function sendTelegram(text) {
 }
 
 export default async function handler(req, res) {
+  const [{ data: prefs }, { data: profile }] = await Promise.all([
+    supabase.from('johnson_preferences').select('pref_type, item, category').eq('status', 'confirmed'),
+    supabase.from('johnson_profile').select('category, fact').order('updated_at', { ascending: false })
+  ]);
+
+  const likes = (prefs || []).filter(p => p.pref_type === 'like').map(p => p.item);
+  const dislikes = (prefs || []).filter(p => p.pref_type === 'dislike').map(p => p.item);
+  const profileFacts = (profile || []).map(p => `[${p.category}] ${p.fact}`).join('\n');
+
+  const prefContext = [
+    likes.length ? `Foods Johnson loves: ${likes.join(', ')}.` : '',
+    dislikes.length ? `Foods to avoid (Johnson dislikes): ${dislikes.join(', ')}.` : '',
+    profileFacts ? `\nJohnson's profile:\n${profileFacts}` : ''
+  ].filter(Boolean).join(' ');
+
   const res2 = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -25,31 +40,7 @@ export default async function handler(req, res) {
       max_tokens: 2000,
       messages: [{
         role: 'user',
-        content: `Generate a healthy weekly meal plan for Baby Johnson, a 2-year-old toddler. Include breakfast, morning snack, lunch, afternoon snack, and dinner for Monday through Sunday. Also generate a complete grocery list grouped by category (Produce, Proteins, Dairy, Grains, etc.).
-
-Respond ONLY with a valid JSON object (no markdown):
-{
-  "week_start": "YYYY-MM-DD",
-  "days": [
-    {
-      "day": "Monday",
-      "meals": {
-        "breakfast": "...",
-        "morning_snack": "...",
-        "lunch": "...",
-        "afternoon_snack": "...",
-        "dinner": "..."
-      }
-    }
-  ],
-  "grocery_list": {
-    "Produce": ["item1", "item2"],
-    "Proteins": ["..."],
-    "Dairy": ["..."],
-    "Grains": ["..."],
-    "Other": ["..."]
-  }
-}`
+        content: `Generate a healthy weekly meal plan for Baby Johnson, a 2-year-old toddler in the Philippines.${prefContext ? '\n\n' + prefContext : ''}\n\nIncorporate his favorite foods where appropriate and avoid anything he dislikes. Include breakfast, morning snack, lunch, afternoon snack, and dinner for Monday through Sunday. Also generate a complete grocery list grouped by category (Produce, Proteins, Dairy, Grains, etc.).\n\nRespond ONLY with a valid JSON object (no markdown):\n{\n  "week_start": "YYYY-MM-DD",\n  "days": [\n    {\n      "day": "Monday",\n      "meals": {\n        "breakfast": "...",\n        "morning_snack": "...",\n        "lunch": "...",\n        "afternoon_snack": "...",\n        "dinner": "..."\n      }\n    }\n  ],\n  "grocery_list": {\n    "Produce": ["item1", "item2"],\n    "Proteins": ["..."],\n    "Dairy": ["..."],\n    "Grains": ["..."],\n    "Other": ["..."]\n  }\n}`
       }]
     })
   });
