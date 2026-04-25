@@ -195,6 +195,14 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div class="card-title">Today's schedule</div>
       <div id="sched-list"><div class="empty-state">No schedule items yet</div></div>
     </div>
+    <div class="card">
+      <div class="card-title">AI assistant — schedule &amp; reminders</div>
+      <div id="sched-chat-msgs" style="min-height:48px;max-height:200px;overflow-y:auto;margin-bottom:.5rem;font-size:13px;display:flex;flex-direction:column;gap:6px"></div>
+      <div class="input-row">
+        <input type="text" id="sched-chat-input" placeholder='e.g. "Add bath time at 7pm" or "Remind me at 9am to give vitamin D"' style="flex:1" onkeydown="if(event.key==='Enter')sendSchedChat()">
+        <button class="btn btn-primary" onclick="sendSchedChat()">Ask</button>
+      </div>
+    </div>
   </div>
 
   <!-- CALENDAR -->
@@ -275,6 +283,10 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div style="margin-top:8px"><button class="btn btn-primary" onclick="getRecipe()">Get recipe idea</button></div>
     </div>
     <div id="recipe-result"></div>
+    <div class="card" id="saved-recipes-card">
+      <div class="card-title">Saved recipe ideas</div>
+      <div id="saved-recipes-list"><div class="empty-state">No saved recipes yet</div></div>
+    </div>
     <div class="card">
       <div class="card-title">Quick recipe ideas</div>
       <div class="rec-item"><h3>Sweet potato &amp; chicken mash</h3><p>Steam sweet potato and chicken breast until soft. Mash together with a small amount of butter. Easy to eat and very nutritious.</p></div>
@@ -297,6 +309,7 @@ let calYear = now.getFullYear(), calMonth = now.getMonth();
 let selectedCalDate = todayKey;
 let currentWeekOffset = 0;
 let currentMealPlan = null;
+let lastRecipe = null;
 
 // ── INIT ──
 document.getElementById('today-date').textContent = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
@@ -613,10 +626,66 @@ async function getRecipe() {
     const r = await fetch('/api/recipe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt})});
     const d = await r.json();
     const txt = d.text || '';
-    res.innerHTML = `<div class="ai-box"><div style="font-size:13px;color:#888;margin-bottom:.5rem">AI recipe for Johnson</div><div class="ai-response">${txt.replace(/</g,'&lt;')}</div></div>`;
+    lastRecipe = { prompt, text: txt };
+    res.innerHTML = `<div class="ai-box">
+      <div style="font-size:13px;color:#888;margin-bottom:.5rem">AI recipe for Johnson</div>
+      <div class="ai-response">${txt.replace(/</g,'&lt;')}</div>
+      <div style="margin-top:.75rem"><button class="btn btn-primary btn-sm" onclick="saveRecipe()">Save to Recipe Ideas</button></div>
+    </div>`;
   } catch(e) {
     res.innerHTML = `<div class="ai-box"><div class="ai-response" style="color:#A32D2D">Could not load recipe. Please try again.</div></div>`;
   }
+}
+
+function saveRecipe() {
+  if(!lastRecipe) return;
+  const saved = JSON.parse(localStorage.getItem('saved_recipes')||'[]');
+  saved.unshift({ ...lastRecipe, savedAt: new Date().toISOString() });
+  localStorage.setItem('saved_recipes', JSON.stringify(saved));
+  renderSavedRecipes();
+  document.querySelector('#recipe-result .btn-primary').textContent = 'Saved ✓';
+}
+
+function renderSavedRecipes() {
+  const saved = JSON.parse(localStorage.getItem('saved_recipes')||'[]');
+  const el = document.getElementById('saved-recipes-list');
+  if(!saved.length){el.innerHTML='<div class="empty-state">No saved recipes yet</div>';return;}
+  el.innerHTML = saved.map((r,i)=>`
+    <div class="rec-item">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <h3>${r.prompt}</h3>
+        <button class="btn btn-sm btn-danger" onclick="deleteSavedRecipe(${i})">Remove</button>
+      </div>
+      <div class="ai-response" style="font-size:13px;margin-top:6px;color:#444">${r.text.replace(/</g,'&lt;')}</div>
+    </div>`).join('');
+}
+
+function deleteSavedRecipe(i) {
+  const saved = JSON.parse(localStorage.getItem('saved_recipes')||'[]');
+  saved.splice(i,1);
+  localStorage.setItem('saved_recipes', JSON.stringify(saved));
+  renderSavedRecipes();
+}
+
+async function sendSchedChat() {
+  const input = document.getElementById('sched-chat-input');
+  const msg = input.value.trim();
+  if(!msg) return;
+  input.value = '';
+  const msgs = document.getElementById('sched-chat-msgs');
+  msgs.innerHTML += `<div style="text-align:right"><span style="background:#EEEDFE;color:#3C3489;padding:5px 10px;border-radius:8px;display:inline-block">${msg}</span></div>`;
+  msgs.innerHTML += `<div><span style="background:#f1efe8;padding:5px 10px;border-radius:8px;display:inline-block;color:#888">Thinking...</span></div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+  try {
+    const r = await fetch('/api/assistant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg})});
+    const d = await r.json();
+    msgs.lastElementChild.innerHTML = `<span style="background:#f1efe8;padding:5px 10px;border-radius:8px;display:inline-block">${d.reply||'Done!'}</span>`;
+    if(d.type==='add_schedule') loadSchedule();
+    if(d.type==='add_reminder') loadReminders();
+  } catch(e) {
+    msgs.lastElementChild.innerHTML = `<span style="background:#FCEBEB;color:#A32D2D;padding:5px 10px;border-radius:8px;display:inline-block">Error. Try again.</span>`;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
 // ── INIT LOAD ──
@@ -625,6 +694,7 @@ async function getRecipe() {
     const cfg = await fetch('/api/config').then(r => r.json());
     sb = supabase.createClient(cfg.url, cfg.anonKey);
     loadFoods();
+    renderSavedRecipes();
   } catch(e) {
     document.querySelector('.app').innerHTML = '<div style="padding:2rem;text-align:center;color:#A32D2D">Failed to connect. Check Vercel environment variables.</div>';
   }

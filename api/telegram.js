@@ -22,7 +22,7 @@ async function sendTelegram(chatId, text) {
   });
 }
 
-async function askClaude(message, senderName) {
+async function handleMention(message, senderName, today, nowTime) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -32,14 +32,40 @@ async function askClaude(message, senderName) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      system: `You are a helpful assistant in a family Telegram group for Baby Johnson, a 2-year-old toddler. You help with baby care questions, nutrition, health tips, development milestones, recipes, and general questions. You're warm, friendly, and concise — this is a chat, not an essay. You also help log food, vitamins, and schedule items for Johnson when asked directly.`,
+      max_tokens: 600,
+      system: `You are the assistant bot for Baby Johnson's family care app. Today is ${today}, current time is ${nowTime}.
+
+You can perform these actions when asked:
+- Answer baby care questions (nutrition, health, milestones, recipes)
+- Log food/drink/snack entries
+- Add schedule items for today
+- Set reminders
+- Show today's food log or schedule (reply with show_food or show_schedule type)
+
+Respond ONLY with valid JSON (no markdown):
+{
+  "type": "chat" | "add_food" | "add_schedule" | "add_reminder" | "show_food" | "show_schedule",
+  "reply": "Friendly message to send back to the group",
+  "data": {
+    // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM or null" }
+    // add_schedule: { "time": "HH:MM", "activity": "..." }
+    // add_reminder: { "time": "HH:MM", "message": "..." }
+    // chat / show_food / show_schedule: {}
+  }
+}`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
     })
   });
+
   const d = await res.json();
-  if (d.error) return `⚠️ API error: ${d.error.message}`;
-  return d.content?.[0]?.text || "Sorry, I couldn't process that right now.";
+  if (d.error) return { type: 'error', reply: `⚠️ API error: ${d.error.message}` };
+
+  const txt = d.content?.[0]?.text || '{}';
+  try {
+    return JSON.parse(txt.replace(/```json|```/g, '').trim());
+  } catch {
+    return { type: 'chat', reply: txt };
+  }
 }
 
 async function parseMessageWithAI(message, photoCaption) {
@@ -110,8 +136,60 @@ export default async function handler(req, res) {
 
   if (isMentioned) {
     const cleanMessage = content.replace(new RegExp(botUsername, 'gi'), '').trim();
-    const reply = await askClaude(cleanMessage || '(no message)', senderName);
-    await sendTelegram(chatId, reply);
+    const action = await handleMention(cleanMessage || '(no message)', senderName, today, nowTime);
+
+    if (action.type === 'add_food' && action.data?.name) {
+      await supabase.from('food_logs').insert({
+        date: today,
+        time: action.data.time || nowTime,
+        name: action.data.name,
+        food_type: action.data.food_type || 'food',
+        portion: action.data.portion || '',
+        source: 'telegram'
+      });
+    }
+
+    if (action.type === 'add_schedule' && action.data?.time && action.data?.activity) {
+      await supabase.from('schedule').insert({
+        date: today,
+        time: action.data.time,
+        activity: action.data.activity,
+        color: '#7F77DD',
+        source: 'telegram'
+      });
+    }
+
+    if (action.type === 'add_reminder' && action.data?.time && action.data?.message) {
+      await supabase.from('reminders').insert({
+        time: action.data.time,
+        message: action.data.message,
+        active: true
+      });
+    }
+
+    if (action.type === 'show_food') {
+      const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
+      if (!foods?.length) {
+        await sendTelegram(chatId, "Nothing logged for Johnson today yet! 🍽️");
+      } else {
+        const list = foods.map(f => `• ${f.time || ''} ${f.name}${f.portion ? ' (' + f.portion + ')' : ''}`).join('\n');
+        await sendTelegram(chatId, `📋 *Johnson's food log today:*\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+
+    if (action.type === 'show_schedule') {
+      const { data: sched } = await supabase.from('schedule').select('*').eq('date', today).order('time');
+      if (!sched?.length) {
+        await sendTelegram(chatId, "No schedule items for today! 📅");
+      } else {
+        const list = sched.map(s => `• ${s.time} — ${s.activity}`).join('\n');
+        await sendTelegram(chatId, `📋 *Johnson's schedule today:*\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+
+    await sendTelegram(chatId, action.reply || "✅ Done!");
     return res.status(200).send('OK');
   }
 
