@@ -10,6 +10,38 @@ export default async function handler(req, res) {
 
   const today = new Date().toISOString().slice(0, 10);
   const nowTime = new Date().toTimeString().slice(0, 5);
+  const msgLower = message.toLowerCase();
+
+  // Detect query intent directly — don't rely on Claude for these
+  const isQuery = /\b(what|show|tell|check|see|list|how)\b/.test(msgLower);
+  if (isQuery && /\b(schedule|routine|plan|activity|activities)\b/.test(msgLower)) {
+    const [{ data: sched }, { data: routine }] = await Promise.all([
+      supabase.from('schedule').select('*').eq('date', today).order('time'),
+      supabase.from('master_schedule').select('*').eq('active', true).order('time')
+    ]);
+    const allItems = [
+      ...(routine || []).map(r => ({ time: r.time, activity: r.activity })),
+      ...(sched || []).map(s => ({ time: s.time, activity: s.activity }))
+    ].sort((a, b) => a.time.localeCompare(b.time));
+    const reply = allItems.length
+      ? `📋 Johnson's schedule today:\n\n${allItems.map(s => `• ${s.time} — ${s.activity}`).join('\n')}`
+      : 'No schedule items for today!';
+    return res.status(200).json({ type: 'show_schedule', reply });
+  }
+  if (isQuery && /\b(eat|ate|food|meal|drink|snack|lunch|dinner|breakfast)\b/.test(msgLower)) {
+    const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
+    const reply = foods?.length
+      ? `🍽️ Johnson's food today:\n\n${foods.map(f => `• ${f.time || '?'} — ${f.name}${f.portion ? ' (' + f.portion + ')' : ''}`).join('\n')}`
+      : "Nothing logged for Johnson today yet!";
+    return res.status(200).json({ type: 'show_food', reply });
+  }
+  if (isQuery && /\b(vitamin|vitamins|supplement)\b/.test(msgLower)) {
+    const { data: vits } = await supabase.from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
+    const reply = vits?.length
+      ? `💊 Johnson's vitamins today:\n\n${vits.map(v => `✅ ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n')}`
+      : 'No vitamins logged for today!';
+    return res.status(200).json({ type: 'show_vitamins', reply });
+  }
 
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
