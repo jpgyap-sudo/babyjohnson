@@ -38,6 +38,7 @@ async function askClaude(message, senderName) {
     })
   });
   const d = await res.json();
+  if (d.error) return `⚠️ API error: ${d.error.message}`;
   return d.content?.[0]?.text || "Sorry, I couldn't process that right now.";
 }
 
