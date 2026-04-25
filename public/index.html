@@ -1,12 +1,634 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Baby Johnson Care System</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baby Johnson Care</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f8f7f4;color:#1a1a18;min-height:100vh}
+.app{max-width:700px;margin:0 auto;padding:1rem}
+.header{background:#fff;border-radius:14px;padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;border:0.5px solid #e0ded6;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.avatar{width:48px;height:48px;border-radius:50%;background:#EEEDFE;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.header-info h1{font-size:18px;font-weight:600;color:#1a1a18}
+.header-info p{font-size:13px;color:#888780}
+.tg-badge{margin-left:auto;font-size:11px;background:#e1f5ee;color:#0f6e56;padding:4px 10px;border-radius:20px;font-weight:500}
+.nav{display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap}
+.nav-btn{padding:7px 13px;border-radius:8px;border:0.5px solid #d3d1c7;background:#fff;font-size:13px;cursor:pointer;color:#5f5e5a;transition:all .15s}
+.nav-btn.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC;font-weight:500}
+.nav-btn:hover:not(.active){background:#f1efe8}
+.section{display:none}.section.active{display:block}
+.card{background:#fff;border:0.5px solid #e0ded6;border-radius:14px;padding:1rem 1.25rem;margin-bottom:.75rem}
+.card-title{font-size:11px;font-weight:600;color:#888780;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.06em}
+.input-row{display:flex;gap:8px;margin-bottom:.5rem;flex-wrap:wrap}
+input,select,textarea{font-family:system-ui,sans-serif;font-size:14px;color:#1a1a18;background:#f8f7f4;border:0.5px solid #d3d1c7;border-radius:8px;padding:8px 10px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:#7F77DD;background:#fff}
+input[type=time]{width:108px}
+input[type=text],input[type=date]{flex:1;min-width:100px}
+select{min-width:110px}
+textarea{width:100%;min-height:64px;resize:vertical}
+.btn{padding:8px 16px;border-radius:8px;border:0.5px solid #d3d1c7;background:#fff;font-size:13px;cursor:pointer;color:#1a1a18;font-family:system-ui,sans-serif;transition:all .15s}
+.btn:hover{background:#f1efe8}
+.btn-primary{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC;font-weight:500}
+.btn-primary:hover{background:#CECBF6}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-danger{color:#A32D2D;border-color:#F09595}
+.btn-danger:hover{background:#FCEBEB}
+.log-item{display:flex;align-items:flex-start;gap:10px;padding:.65rem 0;border-bottom:0.5px solid #eee}
+.log-item:last-child{border-bottom:none}
+.log-time{font-size:12px;color:#aaa;min-width:48px;padding-top:1px}
+.log-name{font-size:14px;color:#1a1a18;font-weight:500}
+.log-sub{font-size:12px;color:#888}
+.log-actions{margin-left:auto}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
+.badge-food{background:#EAF3DE;color:#3B6D11}
+.badge-drink{background:#E6F1FB;color:#185FA5}
+.badge-snack{background:#FAEEDA;color:#854F0B}
+.badge-tg{background:#e1f5ee;color:#0f6e56;font-size:10px;padding:1px 6px}
+.vit-row{display:flex;align-items:center;gap:10px;padding:.6rem 0;border-bottom:0.5px solid #eee}
+.vit-row:last-child{border-bottom:none}
+.vit-name{font-size:14px;flex:1}
+.checkbox{width:20px;height:20px;cursor:pointer;accent-color:#7F77DD}
+.sched-item{display:flex;align-items:center;gap:10px;padding:.6rem 0;border-bottom:0.5px solid #eee}
+.sched-item:last-child{border-bottom:none}
+.sched-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.sched-time{font-size:13px;color:#888;min-width:52px}
+.sched-label{font-size:14px;flex:1}
+.empty-state{text-align:center;padding:2rem;color:#bbb;font-size:13px}
+.summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:.75rem}
+.metric{background:#f8f7f4;border-radius:8px;padding:.75rem;text-align:center}
+.metric-val{font-size:22px;font-weight:600;color:#1a1a18}
+.metric-lbl{font-size:11px;color:#888;margin-top:2px}
+/* Calendar */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:1rem}
+.cal-header{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
+.cal-day-name{text-align:center;font-size:11px;color:#888;font-weight:500;padding:4px 0}
+.cal-day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:13px;cursor:pointer;border:0.5px solid transparent;transition:all .15s;position:relative;flex-direction:column;gap:2px}
+.cal-day:hover{background:#f1efe8}
+.cal-day.has-data{background:#f1efe8}
+.cal-day.selected{background:#EEEDFE;border-color:#AFA9EC;color:#3C3489;font-weight:500}
+.cal-day.today{border-color:#7F77DD}
+.cal-day.other-month{color:#ccc}
+.cal-dots{display:flex;gap:2px;justify-content:center}
+.cal-dot{width:4px;height:4px;border-radius:50%}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.cal-nav h3{font-size:15px;font-weight:500}
+.history-day{font-size:14px;font-weight:500;color:#534AB7;margin-bottom:.5rem}
+/* Reminders */
+.reminder-item{display:flex;align-items:center;gap:10px;padding:.6rem 0;border-bottom:0.5px solid #eee}
+.reminder-item:last-child{border-bottom:none}
+.reminder-time{font-size:13px;color:#534AB7;font-weight:500;min-width:52px}
+.reminder-msg{font-size:14px;flex:1}
+.reminder-active{width:36px;height:20px;cursor:pointer;accent-color:#7F77DD}
+/* Meal Plan */
+.week-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.week-nav h3{font-size:15px;font-weight:500}
+.meal-day-card{background:#f8f7f4;border-radius:10px;padding:.75rem 1rem;margin-bottom:.5rem}
+.meal-day-title{font-size:13px;font-weight:600;color:#534AB7;margin-bottom:.5rem}
+.meal-row{display:flex;gap:8px;margin-bottom:.35rem;align-items:flex-start}
+.meal-label{font-size:11px;color:#888;min-width:90px;font-weight:500;padding-top:2px}
+.meal-text{font-size:13px;color:#1a1a18;flex:1;line-height:1.4}
+.meal-edit-btn{font-size:11px;padding:2px 8px;color:#888}
+.grocery-section{margin-bottom:.75rem}
+.grocery-title{font-size:12px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.35rem}
+.grocery-item{font-size:14px;color:#1a1a18;padding:4px 0;border-bottom:0.5px solid #f0ede6;display:flex;align-items:center;gap:8px}
+.grocery-item:last-child{border-bottom:none}
+.grocery-check{accent-color:#7F77DD}
+.ai-box{background:#f8f7f4;border-radius:10px;padding:1rem;margin-bottom:.75rem}
+.ai-response{font-size:14px;color:#1a1a18;line-height:1.6;white-space:pre-wrap}
+.gen-btn{width:100%;padding:10px;font-size:14px}
+.rec-item{padding:.75rem 0;border-bottom:0.5px solid #eee}
+.rec-item:last-child{border-bottom:none}
+.rec-item h3{font-size:14px;font-weight:500;margin-bottom:3px}
+.rec-item p{font-size:13px;color:#666;line-height:1.5}
+.rec-badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;margin-right:4px;margin-bottom:4px;font-weight:500}
+.tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.loading{opacity:.5;pointer-events:none}
+</style>
 </head>
 <body>
-  <h1>Baby Johnson Care System</h1>
-  <p>Frontend coming soon — paste the full index.html content here.</p>
+<div class="app">
+  <div class="header">
+    <div class="avatar">👶</div>
+    <div class="header-info">
+      <h1>Baby Johnson</h1>
+      <p>2 years old · <span id="today-date"></span></p>
+    </div>
+    <div class="tg-badge">🤖 Telegram connected</div>
+  </div>
+
+  <div class="nav tabs-scroll">
+    <button class="nav-btn active" onclick="switchTab('food',this)">Food Log</button>
+    <button class="nav-btn" onclick="switchTab('vitamins',this)">Vitamins</button>
+    <button class="nav-btn" onclick="switchTab('schedule',this)">Schedule</button>
+    <button class="nav-btn" onclick="switchTab('calendar',this)">Calendar</button>
+    <button class="nav-btn" onclick="switchTab('reminders',this)">Reminders</button>
+    <button class="nav-btn" onclick="switchTab('mealplan',this)">Meal Plan</button>
+    <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
+    <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
+  </div>
+
+  <!-- FOOD LOG -->
+  <div id="tab-food" class="section active">
+    <div class="card">
+      <div class="card-title">Add meal or drink</div>
+      <div class="input-row">
+        <input type="time" id="food-time">
+        <input type="text" id="food-name" placeholder="Food or drink name">
+        <select id="food-type">
+          <option value="food">Meal</option>
+          <option value="drink">Drink</option>
+          <option value="snack">Snack</option>
+        </select>
+      </div>
+      <div class="input-row">
+        <input type="text" id="food-portion" placeholder="Portion (e.g. half bowl)" style="flex:1">
+        <input type="text" id="food-notes" placeholder="Notes (optional)" style="flex:2">
+      </div>
+      <button class="btn btn-primary" onclick="addFood()">Add to log</button>
+    </div>
+    <div class="card">
+      <div class="card-title" id="food-date-label"></div>
+      <div class="summary-row">
+        <div class="metric"><div class="metric-val" id="meal-count">0</div><div class="metric-lbl">Meals</div></div>
+        <div class="metric"><div class="metric-val" id="drink-count">0</div><div class="metric-lbl">Drinks</div></div>
+        <div class="metric"><div class="metric-val" id="snack-count">0</div><div class="metric-lbl">Snacks</div></div>
+      </div>
+      <div id="food-log"><div class="empty-state">No entries yet today</div></div>
+    </div>
+  </div>
+
+  <!-- VITAMINS -->
+  <div id="tab-vitamins" class="section">
+    <div class="card">
+      <div class="card-title">Daily vitamins checklist</div>
+      <div id="vit-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Add vitamin</div>
+      <div class="input-row">
+        <input type="text" id="vit-input" placeholder="Vitamin name (e.g. Vitamin D)" style="flex:1">
+        <button class="btn btn-primary" onclick="addVitamin()">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCHEDULE -->
+  <div id="tab-schedule" class="section">
+    <div class="card">
+      <div class="card-title">Add schedule item</div>
+      <div class="input-row">
+        <input type="time" id="sched-time">
+        <input type="text" id="sched-activity" placeholder="Activity (e.g. Nap time)" style="flex:1">
+        <select id="sched-color">
+          <option value="#7F77DD">Purple</option>
+          <option value="#1D9E75">Green</option>
+          <option value="#378ADD">Blue</option>
+          <option value="#BA7517">Amber</option>
+          <option value="#D85A30">Coral</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addSched()">Add to schedule</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Today's schedule</div>
+      <div id="sched-list"><div class="empty-state">No schedule items yet</div></div>
+    </div>
+  </div>
+
+  <!-- CALENDAR -->
+  <div id="tab-calendar" class="section">
+    <div class="card">
+      <div class="cal-nav">
+        <button class="btn btn-sm" onclick="changeMonth(-1)">&#8592;</button>
+        <h3 id="cal-month-label"></h3>
+        <button class="btn btn-sm" onclick="changeMonth(1)">&#8594;</button>
+      </div>
+      <div class="cal-header">
+        <div class="cal-day-name">Sun</div><div class="cal-day-name">Mon</div>
+        <div class="cal-day-name">Tue</div><div class="cal-day-name">Wed</div>
+        <div class="cal-day-name">Thu</div><div class="cal-day-name">Fri</div>
+        <div class="cal-day-name">Sat</div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+    <div class="card" id="history-card" style="display:none">
+      <div class="card-title">History for <span id="history-date-label"></span></div>
+      <div id="history-content"></div>
+    </div>
+  </div>
+
+  <!-- REMINDERS -->
+  <div id="tab-reminders" class="section">
+    <div class="card">
+      <div class="card-title">Add reminder</div>
+      <div class="input-row">
+        <input type="time" id="rem-time">
+        <input type="text" id="rem-msg" placeholder="Reminder message" style="flex:1">
+      </div>
+      <button class="btn btn-primary" onclick="addReminder()">Add reminder</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Active reminders — sent via Telegram</div>
+      <div id="reminder-list"><div class="empty-state">No reminders yet</div></div>
+    </div>
+  </div>
+
+  <!-- MEAL PLAN -->
+  <div id="tab-mealplan" class="section">
+    <div class="card">
+      <div class="week-nav">
+        <button class="btn btn-sm" onclick="changeWeek(-1)">&#8592;</button>
+        <h3 id="week-label">This week</h3>
+        <button class="btn btn-sm" onclick="changeWeek(1)">&#8594;</button>
+      </div>
+      <button class="btn btn-primary gen-btn" onclick="generateMealPlan()" id="gen-btn">Generate this week's meal plan</button>
+    </div>
+    <div id="mealplan-content"></div>
+    <div id="grocery-content"></div>
+  </div>
+
+  <!-- FOOD GUIDE -->
+  <div id="tab-foodguide" class="section">
+    <div class="card">
+      <div class="card-title">Recommended foods for 2-year-olds</div>
+      <div class="rec-item"><h3>Whole grains</h3><p>Brown rice, oatmeal, whole wheat bread, and pasta. Great source of energy and fiber for growing toddlers.</p><span class="rec-badge" style="background:#EAF3DE;color:#3B6D11">Energy</span><span class="rec-badge" style="background:#EAF3DE;color:#3B6D11">Fiber</span></div>
+      <div class="rec-item"><h3>Soft fruits</h3><p>Banana, mango, papaya, melon, and ripe avocado. Easy to chew, rich in vitamins, and naturally sweet.</p><span class="rec-badge" style="background:#EEEDFE;color:#534AB7">Vitamins</span><span class="rec-badge" style="background:#EEEDFE;color:#534AB7">Healthy fats</span></div>
+      <div class="rec-item"><h3>Vegetables</h3><p>Sweet potato, carrots, squash, broccoli (steamed soft), and spinach. High in iron, calcium, and key vitamins.</p><span class="rec-badge" style="background:#E6F1FB;color:#185FA5">Iron</span><span class="rec-badge" style="background:#E6F1FB;color:#185FA5">Calcium</span></div>
+      <div class="rec-item"><h3>Lean proteins</h3><p>Chicken, fish (boneless), eggs, and tofu. Essential for muscle growth and brain development.</p><span class="rec-badge" style="background:#FAEEDA;color:#854F0B">Protein</span><span class="rec-badge" style="background:#FAEEDA;color:#854F0B">Brain health</span></div>
+      <div class="rec-item"><h3>Dairy</h3><p>Full-fat milk (up to 2 cups/day), yogurt, and soft cheese. Important for bone strength and calcium.</p><span class="rec-badge" style="background:#E6F1FB;color:#185FA5">Calcium</span><span class="rec-badge" style="background:#E6F1FB;color:#185FA5">Bone health</span></div>
+      <div class="rec-item"><h3>Legumes</h3><p>Lentils, chickpeas, and mashed beans. Great plant-based protein and iron, especially important for toddlers.</p><span class="rec-badge" style="background:#FAEEDA;color:#854F0B">Protein</span><span class="rec-badge" style="background:#E6F1FB;color:#185FA5">Iron</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Foods to limit or avoid</div>
+      <div class="rec-item"><h3>Added sugar &amp; salt</h3><p>Avoid sugary drinks, sweets, and salty snacks. A toddler's kidneys and developing taste buds are very sensitive.</p></div>
+      <div class="rec-item"><h3>Choking hazards</h3><p>Whole grapes, large chunks of hard food, whole nuts, popcorn, and hard raw vegetables. Always cut food small.</p></div>
+    </div>
+  </div>
+
+  <!-- RECIPES -->
+  <div id="tab-recipes" class="section">
+    <div class="card">
+      <div class="card-title">Ask for a recipe</div>
+      <textarea id="recipe-prompt" placeholder="e.g. A healthy lunch using chicken and sweet potato, soft enough for a toddler"></textarea>
+      <div style="margin-top:8px"><button class="btn btn-primary" onclick="getRecipe()">Get recipe idea</button></div>
+    </div>
+    <div id="recipe-result"></div>
+    <div class="card">
+      <div class="card-title">Quick recipe ideas</div>
+      <div class="rec-item"><h3>Sweet potato &amp; chicken mash</h3><p>Steam sweet potato and chicken breast until soft. Mash together with a small amount of butter. Easy to eat and very nutritious.</p></div>
+      <div class="rec-item"><h3>Oatmeal with banana</h3><p>Cook rolled oats with milk. Top with mashed ripe banana. Great breakfast full of fiber and energy.</p></div>
+      <div class="rec-item"><h3>Egg &amp; veggie scramble</h3><p>Whisk 1 egg and cook with finely chopped spinach and soft tomato in olive oil. Serve with soft whole wheat toast fingers.</p></div>
+      <div class="rec-item"><h3>Lentil soup</h3><p>Simmer red lentils with carrot, onion, and a pinch of turmeric until very soft. Blend smooth. High in iron and protein.</p></div>
+      <div class="rec-item"><h3>Yogurt &amp; fruit bowl</h3><p>Full-fat plain yogurt with mashed ripe mango or banana. No sugar needed — naturally sweet and packed with calcium.</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ── Loaded from /api/config at runtime
+let sb;
+
+// ── STATE ──
+const now = new Date();
+const todayKey = now.toISOString().slice(0, 10);
+let calYear = now.getFullYear(), calMonth = now.getMonth();
+let selectedCalDate = todayKey;
+let currentWeekOffset = 0;
+let currentMealPlan = null;
+
+// ── INIT ──
+document.getElementById('today-date').textContent = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+document.getElementById('food-date-label').textContent = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+const h = String(now.getHours()).padStart(2,'0'), m = String(now.getMinutes()).padStart(2,'0');
+document.getElementById('food-time').value = h+':'+m;
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  btn.classList.add('active');
+  if(tab==='food') loadFoods();
+  if(tab==='vitamins') loadVitamins();
+  if(tab==='schedule') loadSchedule();
+  if(tab==='calendar') renderCalendar();
+  if(tab==='reminders') loadReminders();
+  if(tab==='mealplan') loadMealPlan();
+}
+
+// ── FOOD LOG ──
+async function addFood() {
+  const t=document.getElementById('food-time').value;
+  const n=document.getElementById('food-name').value.trim();
+  const ty=document.getElementById('food-type').value;
+  const p=document.getElementById('food-portion').value.trim();
+  const no=document.getElementById('food-notes').value.trim();
+  if(!n) return;
+  await sb.from('food_logs').insert({date:todayKey,time:t,name:n,food_type:ty,portion:p,notes:no,source:'app'});
+  document.getElementById('food-name').value='';
+  document.getElementById('food-portion').value='';
+  document.getElementById('food-notes').value='';
+  loadFoods();
+}
+
+async function loadFoods(dateStr) {
+  const d = dateStr || todayKey;
+  const {data} = await sb.from('food_logs').select('*').eq('date',d).order('time');
+  const el = document.getElementById('food-log');
+  const mc = document.getElementById('meal-count');
+  const dc = document.getElementById('drink-count');
+  const sc = document.getElementById('snack-count');
+  if(mc) mc.textContent = data?.filter(f=>f.food_type==='food').length||0;
+  if(dc) dc.textContent = data?.filter(f=>f.food_type==='drink').length||0;
+  if(sc) sc.textContent = data?.filter(f=>f.food_type==='snack').length||0;
+  if(!data?.length){if(el)el.innerHTML='<div class="empty-state">No entries yet</div>';return data||[];}
+  if(el) el.innerHTML = data.map(f=>{
+    const badge = f.food_type==='food'?'badge-food':f.food_type==='drink'?'badge-drink':'badge-snack';
+    const label = f.food_type==='food'?'Meal':f.food_type==='drink'?'Drink':'Snack';
+    const tgBadge = f.source==='telegram'?'<span class="badge badge-tg">via Telegram</span>':'';
+    return `<div class="log-item">
+      <span class="log-time">${f.time||''}</span>
+      <div style="flex:1"><div class="log-name">${f.name} <span class="badge ${badge}">${label}</span>${tgBadge}</div>
+      <div class="log-sub">${[f.portion,f.notes].filter(Boolean).join(' · ')}</div></div>
+      <div class="log-actions"><button class="btn btn-sm btn-danger" onclick="deleteFood('${f.id}')">Remove</button></div>
+    </div>`;
+  }).join('');
+  return data;
+}
+
+async function deleteFood(id) {
+  await sb.from('food_logs').delete().eq('id',id);
+  loadFoods();
+}
+
+// ── VITAMINS ──
+async function loadVitamins() {
+  const {data:vits} = await sb.from('vitamins').select('*').order('name');
+  const {data:logs} = await sb.from('vitamin_logs').select('*').eq('date',todayKey);
+  const el = document.getElementById('vit-list');
+  const takenNames = new Set((logs||[]).filter(l=>l.taken).map(l=>l.vitamin_name));
+  if(!vits?.length){el.innerHTML='<div class="empty-state">No vitamins added yet</div>';return;}
+  el.innerHTML = vits.map(v=>{
+    const done = takenNames.has(v.name);
+    return `<div class="vit-row">
+      <input type="checkbox" class="checkbox" ${done?'checked':''} onchange="toggleVit('${v.name}',this.checked)">
+      <span class="vit-name" style="text-decoration:${done?'line-through':'none'};color:${done?'#aaa':'#1a1a18'}">${v.name}</span>
+      <span class="badge" style="background:${done?'#EAF3DE':'#FAEEDA'};color:${done?'#3B6D11':'#854F0B'}">${done?'Given':'Pending'}</span>
+      <button class="btn btn-sm" onclick="deleteVit('${v.id}')" style="color:#aaa;border-color:transparent">x</button>
+    </div>`;
+  }).join('');
+}
+
+async function toggleVit(name, checked) {
+  if(checked) {
+    await sb.from('vitamin_logs').upsert({date:todayKey,vitamin_name:name,taken:true,time_taken:new Date().toTimeString().slice(0,5),source:'app'},{onConflict:'date,vitamin_name'});
+  } else {
+    await sb.from('vitamin_logs').delete().eq('date',todayKey).eq('vitamin_name',name);
+  }
+  loadVitamins();
+}
+
+async function addVitamin() {
+  const v = document.getElementById('vit-input').value.trim();
+  if(!v) return;
+  await sb.from('vitamins').insert({name:v});
+  document.getElementById('vit-input').value='';
+  loadVitamins();
+}
+
+async function deleteVit(id) {
+  await sb.from('vitamins').delete().eq('id',id);
+  loadVitamins();
+}
+
+// ── SCHEDULE ──
+async function loadSchedule() {
+  const {data} = await sb.from('schedule').select('*').order('time');
+  const el = document.getElementById('sched-list');
+  if(!data?.length){el.innerHTML='<div class="empty-state">No schedule items yet</div>';return;}
+  el.innerHTML = data.map(s=>`<div class="sched-item">
+    <span class="sched-dot" style="background:${s.color||'#7F77DD'}"></span>
+    <span class="sched-time">${s.time}</span>
+    <span class="sched-label">${s.activity}</span>
+    <button class="btn btn-sm btn-danger" onclick="deleteSched('${s.id}')">Remove</button>
+  </div>`).join('');
+}
+
+async function addSched() {
+  const t=document.getElementById('sched-time').value;
+  const a=document.getElementById('sched-activity').value.trim();
+  const c=document.getElementById('sched-color').value;
+  if(!a||!t) return;
+  await sb.from('schedule').insert({time:t,activity:a,color:c,source:'app'});
+  document.getElementById('sched-activity').value='';
+  loadSchedule();
+}
+
+async function deleteSched(id) {
+  await sb.from('schedule').delete().eq('id',id);
+  loadSchedule();
+}
+
+// ── CALENDAR ──
+async function renderCalendar() {
+  const label = new Date(calYear,calMonth,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  document.getElementById('cal-month-label').textContent = label;
+
+  const {data:foodData} = await sb.from('food_logs').select('date').gte('date',`${calYear}-${String(calMonth+1).padStart(2,'0')}-01`).lte('date',`${calYear}-${String(calMonth+1).padStart(2,'0')}-31`);
+  const {data:vitData} = await sb.from('vitamin_logs').select('date').gte('date',`${calYear}-${String(calMonth+1).padStart(2,'0')}-01`).lte('date',`${calYear}-${String(calMonth+1).padStart(2,'0')}-31`).eq('taken',true);
+
+  const daysWithFood = new Set((foodData||[]).map(f=>f.date));
+  const daysWithVit = new Set((vitData||[]).map(v=>v.date));
+
+  const firstDay = new Date(calYear,calMonth,1).getDay();
+  const daysInMonth = new Date(calYear,calMonth+1,0).getDate();
+  const prevDays = new Date(calYear,calMonth,0).getDate();
+
+  const grid = document.getElementById('cal-grid');
+  let html = '';
+
+  for(let i=0;i<firstDay;i++){
+    const d = prevDays - firstDay + i + 1;
+    html += `<div class="cal-day other-month">${d}</div>`;
+  }
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = dateStr === todayKey;
+    const isSel = dateStr === selectedCalDate;
+    const hasFood = daysWithFood.has(dateStr);
+    const hasVit = daysWithVit.has(dateStr);
+    const hasData = hasFood || hasVit;
+    const cls = [isSel?'selected':'',isToday?'today':'',hasData?'has-data':''].filter(Boolean).join(' ');
+    const dots = [hasFood?`<div class="cal-dot" style="background:#3B6D11"></div>`:'', hasVit?`<div class="cal-dot" style="background:#534AB7"></div>`:''].filter(Boolean).join('');
+    html += `<div class="cal-day ${cls}" onclick="selectCalDate('${dateStr}')">${d}${dots?`<div class="cal-dots">${dots}</div>`:''}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+async function selectCalDate(dateStr) {
+  selectedCalDate = dateStr;
+  renderCalendar();
+  const card = document.getElementById('history-card');
+  card.style.display = 'block';
+  document.getElementById('history-date-label').textContent = new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const {data:foods} = await sb.from('food_logs').select('*').eq('date',dateStr).order('time');
+  const {data:vits} = await sb.from('vitamin_logs').select('*').eq('date',dateStr).eq('taken',true);
+  let html = '';
+  if(foods?.length){
+    html += '<div style="margin-bottom:.75rem"><div class="card-title" style="margin-bottom:.5rem">Food &amp; Drinks</div>';
+    html += foods.map(f=>`<div class="log-item"><span class="log-time">${f.time||''}</span><div style="flex:1"><div class="log-name">${f.name}</div><div class="log-sub">${[f.portion,f.notes].filter(Boolean).join(' · ')}</div></div></div>`).join('');
+    html += '</div>';
+  }
+  if(vits?.length){
+    html += '<div style="margin-bottom:.75rem"><div class="card-title" style="margin-bottom:.5rem">Vitamins taken</div>';
+    html += vits.map(v=>`<div class="vit-row"><span style="font-size:14px;color:#3B6D11">✓</span><span class="vit-name">${v.vitamin_name}</span><span style="font-size:12px;color:#888">${v.time_taken||''}</span></div>`).join('');
+    html += '</div>';
+  }
+  if(!foods?.length && !vits?.length) html = '<div class="empty-state">No records for this day</div>';
+  document.getElementById('history-content').innerHTML = html;
+}
+
+function changeMonth(dir) {
+  calMonth += dir;
+  if(calMonth>11){calMonth=0;calYear++;}
+  if(calMonth<0){calMonth=11;calYear--;}
+  renderCalendar();
+}
+
+// ── REMINDERS ──
+async function loadReminders() {
+  const {data} = await sb.from('reminders').select('*').order('time');
+  const el = document.getElementById('reminder-list');
+  if(!data?.length){el.innerHTML='<div class="empty-state">No reminders yet</div>';return;}
+  el.innerHTML = data.map(r=>`<div class="reminder-item">
+    <span class="reminder-time">${r.time}</span>
+    <span class="reminder-msg">${r.message}</span>
+    <input type="checkbox" class="reminder-active" ${r.active?'checked':''} onchange="toggleReminder('${r.id}',this.checked)" title="Active">
+    <button class="btn btn-sm btn-danger" onclick="deleteReminder('${r.id}')">Remove</button>
+  </div>`).join('');
+}
+
+async function addReminder() {
+  const t=document.getElementById('rem-time').value;
+  const m=document.getElementById('rem-msg').value.trim();
+  if(!t||!m) return;
+  await sb.from('reminders').insert({time:t,message:m,active:true});
+  document.getElementById('rem-msg').value='';
+  loadReminders();
+}
+
+async function toggleReminder(id, active) {
+  await sb.from('reminders').update({active}).eq('id',id);
+  loadReminders();
+}
+
+async function deleteReminder(id) {
+  await sb.from('reminders').delete().eq('id',id);
+  loadReminders();
+}
+
+// ── MEAL PLAN ──
+function getWeekStart(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay() + 1 + offset*7);
+  return d.toISOString().slice(0,10);
+}
+
+async function loadMealPlan() {
+  const ws = getWeekStart(currentWeekOffset);
+  const d1 = new Date(ws+'T12:00:00');
+  const d2 = new Date(ws+'T12:00:00');
+  d2.setDate(d2.getDate()+6);
+  document.getElementById('week-label').textContent = `${d1.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${d2.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
+  const {data} = await sb.from('meal_plans').select('*').eq('week_start',ws).single();
+  if(data) { currentMealPlan = JSON.parse(data.plan); renderMealPlan(); }
+  else { document.getElementById('mealplan-content').innerHTML='<div class="empty-state" style="padding:1.5rem">No meal plan for this week yet. Generate one below.</div>'; document.getElementById('grocery-content').innerHTML=''; }
+}
+
+function renderMealPlan() {
+  if(!currentMealPlan) return;
+  const p = currentMealPlan;
+  const mealLabels = {breakfast:'Breakfast',morning_snack:'AM Snack',lunch:'Lunch',afternoon_snack:'PM Snack',dinner:'Dinner'};
+  let html = '<div class="card"><div class="card-title">Weekly meal plan</div>';
+  (p.days||[]).forEach((day,di)=>{
+    html += `<div class="meal-day-card"><div class="meal-day-title">${day.day}</div>`;
+    Object.entries(mealLabels).forEach(([key,lbl])=>{
+      const meal = day.meals?.[key]||'—';
+      html += `<div class="meal-row"><span class="meal-label">${lbl}</span><span class="meal-text" id="meal-${di}-${key}" contenteditable="true" onblur="saveMealEdit(${di},'${key}',this.textContent)">${meal}</span></div>`;
+    });
+    html += '</div>';
+  });
+  html += '</div>';
+  document.getElementById('mealplan-content').innerHTML = html;
+
+  if(p.grocery_list) {
+    let gh = '<div class="card"><div class="card-title">Grocery list</div>';
+    Object.entries(p.grocery_list).forEach(([cat,items])=>{
+      gh += `<div class="grocery-section"><div class="grocery-title">${cat}</div>`;
+      (items||[]).forEach((item,i)=>{
+        gh += `<div class="grocery-item"><input type="checkbox" class="grocery-check" id="gc-${cat}-${i}"><label for="gc-${cat}-${i}" style="cursor:pointer">${item}</label></div>`;
+      });
+      gh += '</div>';
+    });
+    gh += '</div>';
+    document.getElementById('grocery-content').innerHTML = gh;
+  }
+}
+
+async function saveMealEdit(dayIdx, mealKey, val) {
+  if(!currentMealPlan) return;
+  currentMealPlan.days[dayIdx].meals[mealKey] = val;
+  const ws = getWeekStart(currentWeekOffset);
+  await sb.from('meal_plans').update({plan:JSON.stringify(currentMealPlan)}).eq('week_start',ws);
+}
+
+async function generateMealPlan() {
+  const btn = document.getElementById('gen-btn');
+  btn.textContent = 'Generating...';
+  btn.classList.add('loading');
+  try {
+    const res = await fetch('/api/mealplan');
+    if (!res.ok) throw new Error();
+    await loadMealPlan();
+  } catch(e) {
+    alert('Could not generate meal plan. Please check your connection and try again.');
+  }
+  btn.textContent = 'Regenerate meal plan';
+  btn.classList.remove('loading');
+}
+
+function changeWeek(dir) {
+  currentWeekOffset += dir;
+  loadMealPlan();
+}
+
+// ── RECIPES ──
+async function getRecipe() {
+  const prompt = document.getElementById('recipe-prompt').value.trim();
+  if(!prompt) return;
+  const res = document.getElementById('recipe-result');
+  res.innerHTML = `<div class="ai-box"><div style="font-size:13px;color:#888;margin-bottom:.5rem">AI recipe for Johnson</div><div class="ai-response">Thinking...</div></div>`;
+  try {
+    const r = await fetch('/api/recipe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt})});
+    const d = await r.json();
+    const txt = d.text || '';
+    res.innerHTML = `<div class="ai-box"><div style="font-size:13px;color:#888;margin-bottom:.5rem">AI recipe for Johnson</div><div class="ai-response">${txt.replace(/</g,'&lt;')}</div></div>`;
+  } catch(e) {
+    res.innerHTML = `<div class="ai-box"><div class="ai-response" style="color:#A32D2D">Could not load recipe. Please try again.</div></div>`;
+  }
+}
+
+// ── INIT LOAD ──
+(async () => {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    sb = supabase.createClient(cfg.url, cfg.anonKey);
+    loadFoods();
+  } catch(e) {
+    document.querySelector('.app').innerHTML = '<div style="padding:2rem;text-align:center;color:#A32D2D">Failed to connect. Check Vercel environment variables.</div>';
+  }
+})();
+</script>
 </body>
 </html>
