@@ -125,6 +125,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('calendar',this)">Calendar</button>
     <button class="nav-btn" onclick="switchTab('reminders',this)">Reminders</button>
     <button class="nav-btn" onclick="switchTab('mealplan',this)">Meal Plan</button>
+    <button class="nav-btn" onclick="switchTab('routine',this)">Routine</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
   </div>
@@ -257,6 +258,33 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <div id="grocery-content"></div>
   </div>
 
+  <!-- ROUTINE / MASTER SCHEDULE -->
+  <div id="tab-routine" class="section">
+    <div class="card">
+      <div class="card-title">Add to daily routine</div>
+      <div class="input-row">
+        <input type="time" id="routine-time">
+        <input type="text" id="routine-activity" placeholder="Activity (e.g. Bath time)" style="flex:1">
+        <select id="routine-color">
+          <option value="#7F77DD">Purple</option>
+          <option value="#1D9E75">Green</option>
+          <option value="#378ADD">Blue</option>
+          <option value="#BA7517">Amber</option>
+          <option value="#D85A30">Coral</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="addRoutine()">Add to master schedule</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Master schedule — repeats every day</div>
+      <div id="routine-list"><div class="empty-state">No routine items yet</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Today's completion status</div>
+      <div id="routine-today"><div class="empty-state">No items yet</div></div>
+    </div>
+  </div>
+
   <!-- FOOD GUIDE -->
   <div id="tab-foodguide" class="section">
     <div class="card">
@@ -328,6 +356,7 @@ function switchTab(tab, btn) {
   if(tab==='calendar') renderCalendar();
   if(tab==='reminders') loadReminders();
   if(tab==='mealplan') loadMealPlan();
+  if(tab==='routine') loadRoutine();
 }
 
 // ── FOOD LOG ──
@@ -686,6 +715,65 @@ async function sendSchedChat() {
     msgs.lastElementChild.innerHTML = `<span style="background:#FCEBEB;color:#A32D2D;padding:5px 10px;border-radius:8px;display:inline-block">Error. Try again.</span>`;
   }
   msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── ROUTINE / MASTER SCHEDULE ──
+async function loadRoutine() {
+  const {data:items} = await sb.from('master_schedule').select('*').order('time');
+  const {data:logs} = await sb.from('master_schedule_log').select('*').eq('date',todayKey);
+  const listEl = document.getElementById('routine-list');
+  const todayEl = document.getElementById('routine-today');
+  if(!items?.length){
+    listEl.innerHTML='<div class="empty-state">No routine items yet</div>';
+    todayEl.innerHTML='<div class="empty-state">No items yet</div>';
+    return;
+  }
+  const logMap={};
+  (logs||[]).forEach(l=>{logMap[l.master_schedule_id]=l;});
+  listEl.innerHTML = items.map(item=>`
+    <div class="sched-item">
+      <span class="sched-dot" style="background:${item.color||'#7F77DD'}"></span>
+      <span class="sched-time">${item.time}</span>
+      <span class="sched-label">${item.activity}</span>
+      <input type="checkbox" class="checkbox" ${item.active?'checked':''} onchange="toggleRoutine('${item.id}',this.checked)" title="Active">
+      <button class="btn btn-sm btn-danger" onclick="deleteRoutine('${item.id}')">Remove</button>
+    </div>`).join('');
+  const statusLabel = {
+    pending: '<span class="badge" style="background:#f1efe8;color:#888">Not yet</span>',
+    notified: '<span class="badge" style="background:#EEEDFE;color:#534AB7">Waiting...</span>',
+    done: '<span class="badge" style="background:#EAF3DE;color:#3B6D11">✅ Done</span>',
+    skipped: '<span class="badge" style="background:#FAEEDA;color:#854F0B">⏰ Skipped</span>'
+  };
+  todayEl.innerHTML = items.map(item=>{
+    const log = logMap[item.id];
+    const status = !log ? 'pending' : log.completed===null ? 'notified' : log.completed ? 'done' : 'skipped';
+    return `<div class="sched-item">
+      <span class="sched-dot" style="background:${item.color||'#7F77DD'}"></span>
+      <span class="sched-time">${item.time}</span>
+      <span class="sched-label">${item.activity}</span>
+      ${statusLabel[status]}
+    </div>`;
+  }).join('');
+}
+
+async function addRoutine() {
+  const time=document.getElementById('routine-time').value;
+  const activity=document.getElementById('routine-activity').value.trim();
+  const color=document.getElementById('routine-color').value;
+  if(!time||!activity) return;
+  await sb.from('master_schedule').insert({time,activity,color,active:true});
+  document.getElementById('routine-activity').value='';
+  loadRoutine();
+}
+
+async function toggleRoutine(id,active) {
+  await sb.from('master_schedule').update({active}).eq('id',id);
+  loadRoutine();
+}
+
+async function deleteRoutine(id) {
+  await sb.from('master_schedule').delete().eq('id',id);
+  loadRoutine();
 }
 
 // ── INIT LOAD ──

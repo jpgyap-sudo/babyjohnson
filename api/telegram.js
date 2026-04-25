@@ -106,10 +106,69 @@ Respond ONLY with a valid JSON object (no markdown, no explanation):
   catch { return { type: 'none', data: {}, confirmation: null }; }
 }
 
+async function answerCallback(callbackId, text) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackId, text })
+  });
+}
+
+async function editMessage(chatId, messageId, text) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown' })
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(200).send('OK');
 
   const body = req.body;
+
+  // Handle inline keyboard button taps (Yes done / Not yet)
+  const callback = body?.callback_query;
+  if (callback) {
+    const data = callback.data || '';
+    const callbackChatId = callback.message?.chat?.id?.toString();
+    const messageId = callback.message?.message_id;
+    const responderName = callback.from?.first_name || 'Someone';
+
+    if (data.startsWith('done_') || data.startsWith('skip_')) {
+      const firstUnder = data.indexOf('_');
+      const lastUnder = data.lastIndexOf('_');
+      const action = data.slice(0, firstUnder);
+      const scheduleId = data.slice(firstUnder + 1, lastUnder);
+      const date = data.slice(lastUnder + 1);
+      const completed = action === 'done';
+
+      const { data: schedItem } = await supabase
+        .from('master_schedule')
+        .select('activity')
+        .eq('id', scheduleId)
+        .single();
+
+      const activity = schedItem?.activity || 'Activity';
+
+      await supabase.from('master_schedule_log')
+        .update({ completed, responded_at: new Date().toISOString() })
+        .eq('master_schedule_id', scheduleId)
+        .eq('date', date);
+
+      await answerCallback(callback.id, completed ? '✅ Marked as done!' : '⏰ Noted, will try later!');
+      await editMessage(
+        callbackChatId,
+        messageId,
+        completed
+          ? `✅ *${activity}* — Done! Thanks ${responderName}! 🎉`
+          : `⏰ *${activity}* — Not done yet. Noted by ${responderName}.`
+      );
+    }
+
+    return res.status(200).send('OK');
+  }
+
   const msg = body?.message;
   if (!msg) return res.status(200).send('OK');
 
