@@ -705,8 +705,9 @@ export default async function handler(req, res) {
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
-  // ── /dashboard command — send and auto-pin ──────────────────
+  // ── /dashboard command — always first, clears any stuck state ─
   if (text.toLowerCase().startsWith('/dashboard')) {
+    await clearConversationState(userId);
     const messageId = await sendDashboard(chatId);
     if (messageId) {
       await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
@@ -721,18 +722,23 @@ export default async function handler(req, res) {
   // ── Check for pending conversation state ─────────────────────
   const convState = await getConversationState(userId);
   if (convState) {
-    // If user @mentions the bot while a state is pending, clear state and fall through to mention handling
-    const botUsername = await getBotUsername();
-    const entities    = msg.entities || msg.caption_entities || [];
-    const isMentioned = entities
-      .filter(e => e.type === 'mention')
-      .some(e => content.slice(e.offset, e.offset + e.length).toLowerCase() === botUsername.toLowerCase());
-
-    if (!isMentioned) {
-      const handled = await handleConversationReply(convState, content, chatId, userId, senderName, today, nowTime);
-      if (handled) return res.status(200).send('OK');
-    } else {
+    // Expire states older than 10 minutes to prevent stale state from swallowing messages
+    const ageMs = Date.now() - new Date(convState.created_at).getTime();
+    if (ageMs > 10 * 60 * 1000) {
       await clearConversationState(userId);
+    } else {
+      const botUsername = await getBotUsername();
+      const entities    = msg.entities || msg.caption_entities || [];
+      const isMentioned = entities
+        .filter(e => e.type === 'mention')
+        .some(e => content.slice(e.offset, e.offset + e.length).toLowerCase() === botUsername.toLowerCase());
+
+      if (!isMentioned) {
+        const handled = await handleConversationReply(convState, content, chatId, userId, senderName, today, nowTime);
+        if (handled) return res.status(200).send('OK');
+      } else {
+        await clearConversationState(userId);
+      }
     }
   }
 
