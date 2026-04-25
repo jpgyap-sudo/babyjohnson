@@ -28,6 +28,7 @@ export default async function handler(req, res) {
   const pht = new Date(Date.now() + 8 * 60 * 60 * 1000);
   const hhmm = pht.toISOString().slice(11, 16);
   const today = pht.toISOString().slice(0, 10);
+  const isTest = req.query?.test === '1';
 
   // Regular reminders
   const { data: reminders } = await supabase
@@ -41,11 +42,10 @@ export default async function handler(req, res) {
   }
 
   // Master schedule notifications
-  const { data: schedules } = await supabase
-    .from('master_schedule')
-    .select('*')
-    .eq('time', hhmm)
-    .eq('active', true);
+  let scheduleQuery = supabase.from('master_schedule').select('*').eq('active', true);
+  if (!isTest) scheduleQuery = scheduleQuery.eq('time', hhmm);
+  else scheduleQuery = scheduleQuery.order('time').limit(1);
+  const { data: schedules } = await scheduleQuery;
 
   for (const s of schedules || []) {
     // Skip if already notified today
@@ -76,6 +76,9 @@ export default async function handler(req, res) {
   }
 
   return res.status(200).json({
+    pht_time: hhmm,
+    pht_date: today,
+    test_mode: isTest,
     sent: (reminders?.length || 0) + (schedules?.length || 0)
   });
 }
