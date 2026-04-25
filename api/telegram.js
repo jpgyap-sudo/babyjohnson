@@ -4,12 +4,41 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const GROUP_ID = process.env.TELEGRAM_GROUP_CHAT_ID;
 
+let BOT_USERNAME = null;
+
+async function getBotUsername() {
+  if (BOT_USERNAME) return BOT_USERNAME;
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
+  const data = await res.json();
+  BOT_USERNAME = '@' + data.result.username;
+  return BOT_USERNAME;
+}
+
 async function sendTelegram(chatId, text) {
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
   });
+}
+
+async function askClaude(message, senderName) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 800,
+      system: `You are a helpful assistant in a family Telegram group for Baby Johnson, a 2-year-old toddler. You help with baby care questions, nutrition, health tips, development milestones, recipes, and general questions. You're warm, friendly, and concise — this is a chat, not an essay. You also help log food, vitamins, and schedule items for Johnson when asked directly.`,
+      messages: [{ role: 'user', content: `${senderName}: ${message}` }]
+    })
+  });
+  const d = await res.json();
+  return d.content?.[0]?.text || "Sorry, I couldn't process that right now.";
 }
 
 async function parseMessageWithAI(message, photoCaption) {
@@ -63,16 +92,29 @@ export default async function handler(req, res) {
   const hasPhoto = !!msg.photo;
   const today = new Date().toISOString().slice(0, 10);
   const nowTime = new Date().toTimeString().slice(0, 5);
+  const senderName = msg.from?.first_name || 'Someone';
 
-  // Only process from the monitored group
   if (chatId !== GROUP_ID) return res.status(200).send('OK');
-
-  // Skip bot messages
   if (msg.from?.is_bot) return res.status(200).send('OK');
 
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
+  // Check if bot is @mentioned
+  const botUsername = await getBotUsername();
+  const entities = msg.entities || msg.caption_entities || [];
+  const isMentioned = entities
+    .filter(e => e.type === 'mention')
+    .some(e => content.slice(e.offset, e.offset + e.length).toLowerCase() === botUsername.toLowerCase());
+
+  if (isMentioned) {
+    const cleanMessage = content.replace(new RegExp(botUsername, 'gi'), '').trim();
+    const reply = await askClaude(cleanMessage || '(no message)', senderName);
+    await sendTelegram(chatId, reply);
+    return res.status(200).send('OK');
+  }
+
+  // Otherwise parse as a baby care log entry
   const parsed = await parseMessageWithAI(content, hasPhoto ? caption : null);
 
   if (parsed.type === 'food' && parsed.data?.name) {
