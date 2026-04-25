@@ -93,20 +93,26 @@ async function parseMessageWithAI(message, photoCaption) {
       max_tokens: 500,
       messages: [{
         role: 'user',
-        content: `You are a baby care tracker assistant. Parse this message about baby Johnson (2 years old) and extract structured data.
+        content: `You are a baby care tracker for Baby Johnson (2 years old). Parse this group chat message.
 
 Message: "${content}"
 
-Respond ONLY with a valid JSON object (no markdown, no explanation):
+Determine if it is:
+- A LOG ENTRY reporting something Johnson did (food, vitamin, schedule)
+- A QUESTION asking about what Johnson did (query_food, query_vitamins, query_schedule)
+- UNRELATED (none) — e.g. general chat not about Johnson's care
+
+Respond ONLY with valid JSON (no markdown):
 {
-  "type": "food" | "vitamin" | "schedule" | "none",
+  "type": "food" | "vitamin" | "schedule" | "query_food" | "query_vitamins" | "query_schedule" | "none",
   "data": {
-    // if food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
-    // if vitamin: { "name": "...", "time": "HH:MM or null" }
-    // if schedule: { "activity": "...", "time": "HH:MM" }
-    // if none: {}
+    // food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
+    // vitamin: { "name": "...", "time": "HH:MM or null" }
+    // schedule: { "activity": "...", "time": "HH:MM" }
+    // query_*: {}
+    // none: {}
   },
-  "confirmation": "Short friendly confirmation message to send back in the group chat"
+  "confirmation": "Short friendly confirmation (for log entries only, null for queries/none)"
 }`
       }]
     })
@@ -336,6 +342,42 @@ export default async function handler(req, res) {
       source: 'telegram'
     });
     if (parsed.confirmation) await sendTelegram(chatId, `📅 ${parsed.confirmation}`);
+  }
+
+  else if (parsed.type === 'query_food') {
+    const { data: foods } = await supabase
+      .from('food_logs').select('*').eq('date', today).order('time');
+    if (!foods?.length) {
+      await sendTelegram(chatId, "Johnson hasn't eaten anything yet today! 🍽️");
+    } else {
+      const list = foods.map(f =>
+        `• ${f.time || '?'} — ${f.name}${f.portion ? ' (' + f.portion + ')' : ''}${f.food_type === 'drink' ? ' 🥤' : f.food_type === 'snack' ? ' 🍪' : ' 🍽️'}`
+      ).join('\n');
+      const last = foods[foods.length - 1];
+      await sendTelegram(chatId, `🍽️ *Johnson's food log today:*\n\n${list}\n\n_Last ate at ${last.time || '?'}_`);
+    }
+  }
+
+  else if (parsed.type === 'query_vitamins') {
+    const { data: vits } = await supabase
+      .from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
+    if (!vits?.length) {
+      await sendTelegram(chatId, "No vitamins logged for Johnson today! 💊");
+    } else {
+      const list = vits.map(v => `✅ ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n');
+      await sendTelegram(chatId, `💊 *Johnson's vitamins today:*\n\n${list}`);
+    }
+  }
+
+  else if (parsed.type === 'query_schedule') {
+    const { data: sched } = await supabase
+      .from('schedule').select('*').eq('date', today).order('time');
+    if (!sched?.length) {
+      await sendTelegram(chatId, "No schedule items logged for Johnson today! 📅");
+    } else {
+      const list = sched.map(s => `• ${s.time} — ${s.activity}`).join('\n');
+      await sendTelegram(chatId, `📅 *Johnson's schedule today:*\n\n${list}`);
+    }
   }
 
   return res.status(200).send('OK');
