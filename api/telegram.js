@@ -71,27 +71,37 @@ async function clearConversationState(userId) {
 // === DASHBOARD — main button grid ===
 
 async function sendDashboard(chatId) {
-  await sendWithButtons(chatId,
-    `👶 *What is Johnson doing now?*`,
-    [
-      [
-        { text: '🍽 Eating',   callback_data: 'dash_eat' },
-        { text: '😴 Sleeping', callback_data: 'dash_slp' }
-      ],
-      [
-        { text: '🎮 Playing',  callback_data: 'dash_ply' },
-        { text: '📚 Reading',  callback_data: 'dash_rd'  }
-      ],
-      [
-        { text: '🚿 Bath',     callback_data: 'dash_bth' },
-        { text: '💩 Poop',     callback_data: 'dash_poo' }
-      ],
-      [
-        { text: '💊 Vitamins', callback_data: 'dash_vit' },
-        { text: '📝 Note',     callback_data: 'dash_nte' }
-      ]
-    ]
-  );
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `👶 *What is Johnson doing now?*`,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🍽 Eating',   callback_data: 'dash_eat' },
+            { text: '😴 Sleeping', callback_data: 'dash_slp' }
+          ],
+          [
+            { text: '🎮 Playing',  callback_data: 'dash_ply' },
+            { text: '📚 Reading',  callback_data: 'dash_rd'  }
+          ],
+          [
+            { text: '🚿 Bath',     callback_data: 'dash_bth' },
+            { text: '💩 Poop',     callback_data: 'dash_poo' }
+          ],
+          [
+            { text: '💊 Vitamins', callback_data: 'dash_vit' },
+            { text: '📝 Note',     callback_data: 'dash_nte' }
+          ]
+        ]
+      }
+    })
+  });
+  const data = await res.json();
+  return data?.result?.message_id;
 }
 
 // === DASHBOARD — handle all dash_ callback_queries ===
@@ -695,9 +705,16 @@ export default async function handler(req, res) {
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
-  // ── /dashboard command ───────────────────────────────────────
+  // ── /dashboard command — send and auto-pin ──────────────────
   if (text.toLowerCase().startsWith('/dashboard')) {
-    await sendDashboard(chatId);
+    const messageId = await sendDashboard(chatId);
+    if (messageId) {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId, disable_notification: true })
+      });
+    }
     return res.status(200).send('OK');
   }
 
