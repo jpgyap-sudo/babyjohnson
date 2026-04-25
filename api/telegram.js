@@ -56,16 +56,22 @@ async function setConversationState(userId, state) {
 }
 
 async function getConversationState(userId) {
-  const { data } = await supabase
-    .from('conversation_state')
-    .select('*')
-    .eq('telegram_user_id', userId)
-    .maybeSingle();
-  return data;
+  try {
+    const { data } = await supabase
+      .from('conversation_state')
+      .select('*')
+      .eq('telegram_user_id', userId)
+      .maybeSingle();
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 async function clearConversationState(userId) {
-  await supabase.from('conversation_state').delete().eq('telegram_user_id', userId);
+  try {
+    await supabase.from('conversation_state').delete().eq('telegram_user_id', userId);
+  } catch {}
 }
 
 // === DASHBOARD — main button grid ===
@@ -705,16 +711,21 @@ export default async function handler(req, res) {
   const content = caption || text;
   if (!content && !hasPhoto) return res.status(200).send('OK');
 
-  // ── /dashboard command — always first, clears any stuck state ─
+  // ── /dashboard command — always first, nothing can block it ───
   if (text.toLowerCase().startsWith('/dashboard')) {
-    await clearConversationState(userId);
-    const messageId = await sendDashboard(chatId);
-    if (messageId) {
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, message_id: messageId, disable_notification: true })
-      });
+    clearConversationState(userId).catch(() => {});  // fire and forget
+    try {
+      const messageId = await sendDashboard(chatId);
+      if (messageId) {
+        // Pinning is optional — fire and forget, don't block
+        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: messageId, disable_notification: true })
+        }).catch(() => {});
+      }
+    } catch (e) {
+      await sendTelegram(chatId, `⚠️ Dashboard error: ${e.message}`).catch(() => {});
     }
     return res.status(200).send('OK');
   }
