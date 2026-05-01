@@ -8,10 +8,16 @@ let BOT_USERNAME = null;
 
 async function getBotUsername() {
   if (BOT_USERNAME) return BOT_USERNAME;
-  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
-  const data = await res.json();
-  BOT_USERNAME = '@' + data.result.username;
-  return BOT_USERNAME;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
+    const data = await res.json();
+    if (!data.ok || !data.result?.username) throw new Error(data.description || 'Invalid bot response');
+    BOT_USERNAME = '@' + data.result.username;
+    return BOT_USERNAME;
+  } catch (e) {
+    console.error('getBotUsername failed:', e.message);
+    return '@unknown_bot';
+  }
 }
 
 async function sendTelegram(chatId, text) {
@@ -343,8 +349,12 @@ async function handleDashboardCallback(data, chatId, userId, senderName, pht) {
     const labels     = { a: 'All', h: 'Half', f: 'Few bites', r: 'Refused' };
     const label      = labels[portionKey] || portionKey;
 
-    await supabase.from('food_logs').update({ portion: label }).eq('id', foodLogId);
-    await sendTelegram(chatId, `✅ Updated — Johnson ate *${label}*`);
+    const { error } = await supabase.from('food_logs').update({ portion: label }).eq('id', foodLogId);
+    if (error) {
+      await sendTelegram(chatId, `⚠️ Could not update portion: ${error.message}`);
+    } else {
+      await sendTelegram(chatId, `✅ Updated — Johnson ate *${label}*`);
+    }
     return;
   }
 }
@@ -358,10 +368,15 @@ async function handleConversationReply(state, text, chatId, userId, senderName, 
 
   // 🍽 EATING — food name
   if (state.action_type === 'eating' && state.step === 'food_name') {
-    const { data: foodLog } = await supabase.from('food_logs').insert({
+    const { data: foodLog, error: foodError } = await supabase.from('food_logs').insert({
       date: today, time: clickedTime,
       name: text, food_type: 'food', portion: '', source: 'dashboard'
     }).select().single();
+
+    if (foodError) {
+      await sendTelegram(chatId, `⚠️ Could not log food: ${foodError.message}`);
+      return true;
+    }
 
     await supabase.from('caregiver_actions').insert({
       caregiver_name: senderName, action_type: 'eating',
@@ -483,7 +498,7 @@ Respond ONLY with valid JSON (no markdown):
 
 Single action:
 {
-  "type": "chat" | "limitation" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences",
+  "type": "chat" | "limitation" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences" | "show_mealplan",
   "reply": "Your full answer here — for chat, write a complete helpful response",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
@@ -493,6 +508,7 @@ Single action:
     // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
     // show_activity: { "date_ref": "today" | "yesterday" }
     // show_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
+    // show_mealplan: {}
     // limitation: { "title": "short feature name", "description": "what the user wants the app to do", "reason": "what triggered this" }
     // chat/others: {}
   }
@@ -553,7 +569,7 @@ Determine if it is:
   - preference: when someone mentions something Johnson likes/loves/enjoys OR hates/dislikes/doesn't like
   - context_reminder: a suggestion to do something specific WHENEVER a particular activity happens (e.g. "please eat with johnson when he eats", "dim the lights when he naps", "play soft music during bath time")
 - A QUESTION asking about what Johnson did or likes:
-  - query_food, query_vitamins, query_schedule, query_activity, query_preferences
+  - query_food, query_vitamins, query_schedule, query_activity, query_preferences, query_mealplan
 - UNRELATED (none) — general chat not about Johnson's care
 
 For context_reminder: identify the trigger activity and the reminder message.
@@ -562,7 +578,7 @@ For context_reminder: identify the trigger activity and the reminder message.
 
 Respond ONLY with valid JSON (no markdown):
 {
-  "type": "food" | "vitamin" | "schedule" | "activity" | "preference" | "context_reminder" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "query_preferences" | "none",
+  "type": "food" | "vitamin" | "schedule" | "activity" | "preference" | "context_reminder" | "query_food" | "query_vitamins" | "query_schedule" | "query_activity" | "query_preferences" | "query_mealplan" | "none",
   "data": {
     // food: { "name": "...", "portion": "...", "food_type": "food|drink|snack", "time": "HH:MM or null", "notes": "..." }
     // vitamin: { "name": "...", "time": "HH:MM or null" }
@@ -572,6 +588,7 @@ Respond ONLY with valid JSON (no markdown):
     // context_reminder: { "trigger": "food|Nap|Bath|School|Breakfast|Lunch|Dinner|Sleep|...", "message": "reminder text to send the group" }
     // query_activity: { "date_ref": "today" | "yesterday" }
     // query_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
+    // query_mealplan: {}
     // others: {}
   },
   "confirmation": "Short friendly confirmation (for log entries only, null for queries/none)"
@@ -688,6 +705,7 @@ export default async function handler(req, res) {
           ? `✅ *${activity}* — Done! Thanks ${responderName}! 🎉`
           : `⏰ *${activity}* — Not done yet. Noted by ${responderName}.`
       );
+      return res.status(200).send('OK');
     }
 
     return res.status(200).send('OK');
@@ -804,11 +822,15 @@ export default async function handler(req, res) {
     }
 
     if (action.type === 'add_food' && action.data?.name) {
-      await supabase.from('food_logs').insert({
+      const { error } = await supabase.from('food_logs').insert({
         date: today, time: action.data.time || nowTime,
         name: action.data.name, food_type: action.data.food_type || 'food',
         portion: action.data.portion || '', source: 'telegram'
       });
+      if (error) {
+        await sendTelegram(chatId, `⚠️ Could not log food: ${error.message}`);
+        return res.status(200).send('OK');
+      }
     }
     if (action.type === 'add_schedule' && action.data?.time && action.data?.activity) {
       await supabase.from('schedule').insert({
@@ -885,6 +907,40 @@ export default async function handler(req, res) {
       }
       return res.status(200).send('OK');
     }
+    if (action.type === 'show_mealplan') {
+      const { data: plans } = await supabase
+        .from('meal_plans').select('*').order('week_start', { ascending: false }).limit(1);
+      const plan = plans?.[0];
+      if (!plan) {
+        await sendTelegram(chatId, "No meal plan has been generated yet! 🍽️");
+      } else {
+        let p;
+        try { p = JSON.parse(plan.plan); } catch { p = null; }
+        const days = p?.days || [];
+        let m = `🍽️ *Johnson's Meal Plan — Week of ${plan.week_start}*`;
+        for (const d of days) {
+          m += `\n\n*${d.day}*\n`;
+          const meals = d.meals || {};
+          if (meals.breakfast)        m += `🌅 Breakfast: ${meals.breakfast}\n`;
+          if (meals.morning_snack)    m += `🍎 Morning snack: ${meals.morning_snack}\n`;
+          if (meals.lunch)            m += `☀️ Lunch: ${meals.lunch}\n`;
+          if (meals.afternoon_snack)  m += `🍪 Afternoon snack: ${meals.afternoon_snack}\n`;
+          if (meals.dinner)           m += `🌙 Dinner: ${meals.dinner}\n`;
+        }
+        const groceries = p?.grocery_list || {};
+        const categories = Object.keys(groceries);
+        if (categories.length) {
+          m += `\n\n🛒 *Grocery List*\n`;
+          for (const cat of categories) {
+            const items = groceries[cat];
+            if (items?.length) m += `\n*${cat}:*\n${items.map(i => `• ${i}`).join('\n')}`;
+          }
+        }
+        await sendTelegram(chatId, m);
+      }
+      return res.status(200).send('OK');
+    }
+
     if (action.type === 'limitation') {
       await sendTelegram(chatId, action.reply || "I can't do that yet!");
       const { data: inserted } = await supabase.from('app_suggestions').insert({
@@ -914,12 +970,16 @@ export default async function handler(req, res) {
   const parsed = await parseMessageWithAI(content, hasPhoto ? caption : null);
 
   if (parsed.type === 'food' && parsed.data?.name) {
-    await supabase.from('food_logs').insert({
+    const { error } = await supabase.from('food_logs').insert({
       date: today, time: parsed.data.time || nowTime,
       name: parsed.data.name, food_type: parsed.data.food_type || 'food',
       portion: parsed.data.portion || '', notes: parsed.data.notes || '', source: 'telegram'
     });
-    if (parsed.confirmation) await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
+    if (error) {
+      await sendTelegram(chatId, `⚠️ Could not log food: ${error.message}`);
+    } else if (parsed.confirmation) {
+      await sendTelegram(chatId, `✅ ${parsed.confirmation}`);
+    }
     const { data: ctxFood } = await supabase.from('context_reminders').select('*').eq('trigger', 'food').eq('active', true);
     for (const c of ctxFood || []) await sendTelegram(chatId, `🔔 *Reminder:* ${c.message}`);
   }
@@ -1036,6 +1096,39 @@ export default async function handler(req, res) {
     } else {
       const list = acts.map(a => `• ${a.time || '?'} — ${a.activity}${a.notes ? ' (' + a.notes + ')' : ''}`).join('\n');
       await sendTelegram(chatId, `📋 *Johnson's activities on ${queryDate}:*\n\n${list}`);
+    }
+  }
+
+  else if (parsed.type === 'query_mealplan') {
+    const { data: plans } = await supabase
+      .from('meal_plans').select('*').order('week_start', { ascending: false }).limit(1);
+    const plan = plans?.[0];
+    if (!plan) {
+      await sendTelegram(chatId, "No meal plan has been generated yet! 🍽️");
+    } else {
+      let p;
+      try { p = JSON.parse(plan.plan); } catch { p = null; }
+      const days = p?.days || [];
+      let m = `🍽️ *Johnson's Meal Plan — Week of ${plan.week_start}*`;
+      for (const d of days) {
+        m += `\n\n*${d.day}*\n`;
+        const meals = d.meals || {};
+        if (meals.breakfast)        m += `🌅 Breakfast: ${meals.breakfast}\n`;
+        if (meals.morning_snack)    m += `🍎 Morning snack: ${meals.morning_snack}\n`;
+        if (meals.lunch)            m += `☀️ Lunch: ${meals.lunch}\n`;
+        if (meals.afternoon_snack)  m += `🍪 Afternoon snack: ${meals.afternoon_snack}\n`;
+        if (meals.dinner)           m += `🌙 Dinner: ${meals.dinner}\n`;
+      }
+      const groceries = p?.grocery_list || {};
+      const categories = Object.keys(groceries);
+      if (categories.length) {
+        m += `\n\n🛒 *Grocery List*\n`;
+        for (const cat of categories) {
+          const items = groceries[cat];
+          if (items?.length) m += `\n*${cat}:*\n${items.map(i => `• ${i}`).join('\n')}`;
+        }
+      }
+      await sendTelegram(chatId, m);
     }
   }
 

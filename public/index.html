@@ -587,7 +587,7 @@ async function deleteVit(id) {
 
 // ── SCHEDULE ──
 async function loadSchedule() {
-  const {data} = await sb.from('schedule').select('*').order('time');
+  const {data} = await sb.from('schedule').select('*').eq('date',todayKey).order('time');
   const el = document.getElementById('sched-list');
   if(!data?.length){el.innerHTML='<div class="empty-state">No schedule items yet</div>';return;}
   el.innerHTML = data.map(s=>`<div class="sched-item">
@@ -603,7 +603,7 @@ async function addSched() {
   const a=document.getElementById('sched-activity').value.trim();
   const c=document.getElementById('sched-color').value;
   if(!a||!t) return;
-  await sb.from('schedule').insert({time:t,activity:a,color:c,source:'app'});
+  await sb.from('schedule').insert({date:todayKey,time:t,activity:a,color:c,source:'app'});
   document.getElementById('sched-activity').value='';
   loadSchedule();
 }
