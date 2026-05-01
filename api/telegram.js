@@ -21,35 +21,86 @@ async function getBotUsername() {
 }
 
 async function sendTelegram(chatId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
-  });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      // Retry without Markdown if parsing failed
+      if (err.description?.includes('can\'t parse entities')) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text })
+        });
+      } else {
+        console.error('sendTelegram failed:', err.description || res.statusText);
+      }
+    }
+  } catch (e) {
+    console.error('sendTelegram exception:', e.message);
+  }
 }
 
 async function sendWithButtons(chatId, text, inlineKeyboard) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } })
-  });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (err.description?.includes('can\'t parse entities')) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: inlineKeyboard } })
+        });
+      } else {
+        console.error('sendWithButtons failed:', err.description || res.statusText);
+      }
+    }
+  } catch (e) {
+    console.error('sendWithButtons exception:', e.message);
+  }
 }
 
 async function answerCallback(callbackId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: callbackId, text })
-  });
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackId, text })
+    });
+  } catch (e) {
+    console.error('answerCallback exception:', e.message);
+  }
 }
 
 async function editMessage(chatId, messageId, text) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown' })
-  });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'Markdown' })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (err.description?.includes('can\'t parse entities')) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: messageId, text })
+        });
+      }
+    }
+  } catch (e) {
+    console.error('editMessage exception:', e.message);
+  }
 }
 
 // === DASHBOARD — conversation state helpers ===
@@ -788,7 +839,24 @@ export default async function handler(req, res) {
 
   if (isMentioned) {
     const cleanMessage = content.replace(new RegExp(botUsername, 'gi'), '').trim();
-    const action = await handleMention(cleanMessage || '(no message)', senderName, today, nowTime);
+    let action;
+    try {
+      action = await handleMention(cleanMessage || '(no message)', senderName, today, nowTime);
+    } catch (e) {
+      console.error('handleMention error:', e.message);
+      await sendTelegram(chatId, `⚠️ Sorry, I'm having trouble thinking right now. Please try again in a moment!`);
+      return res.status(200).send('OK');
+    }
+
+    if (!action || !action.type) {
+      await sendTelegram(chatId, `🤔 I didn't understand that. Can you rephrase?`);
+      return res.status(200).send('OK');
+    }
+
+    if (action.type === 'chat') {
+      await sendTelegram(chatId, action.reply || "I'm here! What would you like to know?");
+      return res.status(200).send('OK');
+    }
 
     if (action.type === 'bulk' && action.actions?.length) {
       let count = 0;
@@ -833,15 +901,23 @@ export default async function handler(req, res) {
       }
     }
     if (action.type === 'add_schedule' && action.data?.time && action.data?.activity) {
-      await supabase.from('schedule').insert({
+      const { error } = await supabase.from('schedule').insert({
         date: today, time: action.data.time, activity: action.data.activity,
         color: '#7F77DD', source: 'telegram'
       });
+      if (error) {
+        await sendTelegram(chatId, `⚠️ Could not add schedule: ${error.message}`);
+        return res.status(200).send('OK');
+      }
     }
     if (action.type === 'add_reminder' && action.data?.time && action.data?.message) {
-      await supabase.from('reminders').insert({
+      const { error } = await supabase.from('reminders').insert({
         time: action.data.time, message: action.data.message, active: true
       });
+      if (error) {
+        await sendTelegram(chatId, `⚠️ Could not add reminder: ${error.message}`);
+        return res.status(200).send('OK');
+      }
     }
     if (action.type === 'show_food') {
       const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
@@ -873,10 +949,14 @@ export default async function handler(req, res) {
       return res.status(200).send('OK');
     }
     if (action.type === 'add_activity' && action.data?.activity) {
-      await supabase.from('activity_logs').insert({
+      const { error } = await supabase.from('activity_logs').insert({
         date: today, time: action.data.time || nowTime,
         activity: action.data.activity, notes: action.data.notes || '', source: 'telegram'
       });
+      if (error) {
+        await sendTelegram(chatId, `⚠️ Could not log activity: ${error.message}`);
+        return res.status(200).send('OK');
+      }
     }
     if (action.type === 'show_activity') {
       const queryDate = action.data?.date_ref === 'yesterday'
@@ -967,7 +1047,13 @@ export default async function handler(req, res) {
   }
 
   // ── Passive message parsing ──────────────────────────────────
-  const parsed = await parseMessageWithAI(content, hasPhoto ? caption : null);
+  let parsed;
+  try {
+    parsed = await parseMessageWithAI(content, hasPhoto ? caption : null);
+  } catch (e) {
+    console.error('parseMessageWithAI error:', e.message);
+    parsed = { type: 'none', data: {}, confirmation: null };
+  }
 
   if (parsed.type === 'food' && parsed.data?.name) {
     const { error } = await supabase.from('food_logs').insert({
