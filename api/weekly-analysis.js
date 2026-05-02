@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     supabase.from('food_logs').select('*').gte('date', weekAgo).order('date').order('time'),
     supabase.from('vitamin_logs').select('*').gte('date', weekAgo).eq('taken', true),
     supabase.from('schedule').select('*').gte('date', weekAgo).order('date').order('time'),
-    supabase.from('master_schedule_log').select('*').gte('date', weekAgo),
+    supabase.from('master_schedule_log').select('*, master_schedule(activity)').gte('date', weekAgo),
     supabase.from('johnson_profile').select('*').order('updated_at', { ascending: false })
   ]);
 
@@ -80,7 +80,7 @@ SCHEDULE ENTRIES (${schedules?.length || 0}):
 ${(schedules || []).map(s => `${s.date} ${s.time||'?'} - ${s.activity} [source: ${s.source}]`).join('\n') || 'None'}
 
 DAILY ROUTINE COMPLETION (${routineLogs?.length || 0} entries):
-${(routineLogs || []).map(l => `${l.date} - "${l.activity}": ${l.completed === null ? 'no response' : l.completed ? '✅ done' : '❌ skipped'}`).join('\n') || 'None'}
+${(routineLogs || []).map(l => `${l.date} - "${l.activity || l.master_schedule?.activity || 'Routine item'}": ${l.completed === null ? 'no response' : l.completed ? '✅ done' : '❌ skipped'}`).join('\n') || 'None'}
 
 JOHNSON'S CURRENT PROFILE:
 ${existingProfile}`

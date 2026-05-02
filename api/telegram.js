@@ -6,6 +6,21 @@ const GROUP_ID = process.env.TELEGRAM_GROUP_CHAT_ID;
 
 let BOT_USERNAME = null;
 
+function splitTelegramText(text, maxLength = 3800) {
+  if (!text || text.length <= maxLength) return [text || ''];
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    let splitAt = remaining.lastIndexOf('\n\n', maxLength);
+    if (splitAt < maxLength * 0.5) splitAt = remaining.lastIndexOf('\n', maxLength);
+    if (splitAt < maxLength * 0.5) splitAt = maxLength;
+    chunks.push(remaining.slice(0, splitAt).trim());
+    remaining = remaining.slice(splitAt).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 async function getBotUsername() {
   if (BOT_USERNAME) return BOT_USERNAME;
   try {
@@ -22,22 +37,24 @@ async function getBotUsername() {
 
 async function sendTelegram(chatId, text) {
   try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      // Retry without Markdown if parsing failed
-      if (err.description?.includes('can\'t parse entities')) {
-        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text })
-        });
-      } else {
-        console.error('sendTelegram failed:', err.description || res.statusText);
+    for (const chunk of splitTelegramText(text)) {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: 'Markdown' })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        // Retry without Markdown if parsing failed
+        if (err.description?.includes('can\'t parse entities')) {
+          await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: chunk })
+          });
+        } else {
+          console.error('sendTelegram failed:', err.description || res.statusText);
+        }
       }
     }
   } catch (e) {
@@ -104,6 +121,63 @@ async function editMessage(chatId, messageId, text) {
 }
 
 // === DASHBOARD — conversation state helpers ===
+
+function isMealPlanQuery(text = '') {
+  return /\b(meal\s*plan|mealplan|weekly\s+menu|food\s+plan|menu\s+for\s+(the\s+)?week)\b/i.test(text);
+}
+
+function buildMealPlanText(planRow) {
+  if (!planRow) return "No meal plan has been generated yet! Open the Meal Plan tab and tap Generate this week's meal plan.";
+
+  let parsed;
+  try {
+    parsed = typeof planRow.plan === 'string' ? JSON.parse(planRow.plan) : planRow.plan;
+  } catch {
+    return `Meal plan for week of ${planRow.week_start} exists, but I could not read it. Please regenerate it from the Meal Plan tab.`;
+  }
+
+  const days = parsed?.days || [];
+  const lines = [`Johnson's Meal Plan - Week of ${planRow.week_start}`];
+
+  for (const day of days) {
+    const meals = day.meals || {};
+    lines.push('');
+    lines.push(`*${day.day}*`);
+    if (meals.breakfast) lines.push(`Breakfast: ${meals.breakfast}`);
+    if (meals.morning_snack) lines.push(`AM snack: ${meals.morning_snack}`);
+    if (meals.lunch) lines.push(`Lunch: ${meals.lunch}`);
+    if (meals.afternoon_snack) lines.push(`PM snack: ${meals.afternoon_snack}`);
+    if (meals.dinner) lines.push(`Dinner: ${meals.dinner}`);
+  }
+
+  const groceries = parsed?.grocery_list || {};
+  const categories = Object.keys(groceries);
+  if (categories.length) {
+    lines.push('');
+    lines.push('*Grocery List*');
+    for (const category of categories) {
+      const items = groceries[category] || [];
+      if (items.length) lines.push(`${category}: ${items.join(', ')}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+async function sendLatestMealPlan(chatId) {
+  const { data: plans, error } = await supabase
+    .from('meal_plans')
+    .select('*')
+    .order('week_start', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    await sendTelegram(chatId, `Could not load the meal plan: ${error.message}`);
+    return;
+  }
+
+  await sendTelegram(chatId, buildMealPlanText(plans?.[0]));
+}
 
 async function setConversationState(userId, state) {
   await supabase.from('conversation_state').upsert(
@@ -542,22 +616,26 @@ async function handleMention(message, senderName, today, nowTime) {
       system: `You are a helpful AI assistant in a family Telegram group. Today is ${today}, current time is ${nowTime}. You have access to Baby Johnson's care app (2 years old, Philippines).
 
 You can do two things:
-1. Answer ANY question or help with ANY topic — general knowledge, advice, recipes, parenting tips, language, math, anything. Use "chat" type for this.
+1. Answer ANY question or help with ANY topic — general knowledge, advice, recipes, parenting tips, language, math, anything. Use "chat" type for this. You do not have live web browsing; if a question needs current online facts, say that it may need checking.
 2. Perform care app actions for Johnson — logging food, schedule, reminders, activities, etc.
 
 Respond ONLY with valid JSON (no markdown):
 
 Single action:
 {
-  "type": "chat" | "limitation" | "add_food" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_schedule" | "show_activity" | "show_preferences" | "show_mealplan",
+  "type": "chat" | "limitation" | "add_food" | "add_vitamin" | "add_schedule" | "add_reminder" | "add_routine" | "add_activity" | "show_food" | "show_vitamins" | "show_schedule" | "show_routine" | "show_activity" | "show_preferences" | "show_mealplan",
   "reply": "Your full answer here — for chat, write a complete helpful response",
   "data": {
     // add_food: { "name": "...", "food_type": "food|drink|snack", "portion": "...", "time": "HH:MM" }
+    // add_vitamin: { "name": "...", "time": "HH:MM" }
     // add_schedule: { "time": "HH:MM", "activity": "..." }
     // add_reminder: { "time": "HH:MM", "message": "..." }
     // add_routine: { "time": "HH:MM", "activity": "..." }
     // add_activity: { "activity": "...", "time": "HH:MM", "notes": "..." }
     // show_activity: { "date_ref": "today" | "yesterday" }
+    // show_vitamins: {}
+    // show_schedule: {}
+    // show_routine: {}
     // show_preferences: { "pref_type": "like" | "dislike" | "all", "category": "food|drink|activity|all" }
     // show_mealplan: {}
     // limitation: { "title": "short feature name", "description": "what the user wants the app to do", "reason": "what triggered this" }
@@ -576,6 +654,9 @@ Rules:
 - For general questions (weather, health tips, math, recipes, advice, etc.) — answer fully in "reply" using type "chat"
 - Use "limitation" ONLY when the user asks for an app feature that doesn't exist yet (not for general knowledge questions)
 - "add_routine" = repeats every day; "add_schedule" = today only
+- Use "show_mealplan" when asked for Johnson's weekly meal plan, mealplan, menu this week, or food plan
+- Use "show_vitamins" when asked about vitamins taken today
+- Use "show_routine" when asked about the daily repeating routine
 - Use "bulk" for 2+ app actions at once
 - Respond ONLY with valid JSON, no markdown`,
       messages: [{ role: 'user', content: `${senderName}: ${message}` }]
@@ -808,6 +889,14 @@ export default async function handler(req, res) {
   }
 
   // ── Check for pending conversation state ─────────────────────
+  // Deterministic meal-plan query. This keeps the feature working even if
+  // a pending dashboard state or AI classifier would otherwise miss it.
+  if (isMealPlanQuery(content)) {
+    await clearConversationState(userId).catch(() => {});
+    await sendLatestMealPlan(chatId);
+    return res.status(200).send('OK');
+  }
+
   const convState = await getConversationState(userId);
   if (convState) {
     // Expire states older than 10 minutes to prevent stale state from swallowing messages
@@ -883,6 +972,12 @@ export default async function handler(req, res) {
             portion: a.data.portion || '', source: 'telegram'
           });
           count++;
+        } else if (a.type === 'add_vitamin' && a.data?.name) {
+          await supabase.from('vitamin_logs').upsert({
+            date: today, vitamin_name: a.data.name, taken: true,
+            time_taken: a.data.time || nowTime, source: 'telegram'
+          }, { onConflict: 'date,vitamin_name' });
+          count++;
         }
       }
       await sendTelegram(chatId, action.reply || `✅ Added ${count} items!`);
@@ -897,6 +992,16 @@ export default async function handler(req, res) {
       });
       if (error) {
         await sendTelegram(chatId, `⚠️ Could not log food: ${error.message}`);
+        return res.status(200).send('OK');
+      }
+    }
+    if (action.type === 'add_vitamin' && action.data?.name) {
+      const { error } = await supabase.from('vitamin_logs').upsert({
+        date: today, vitamin_name: action.data.name, taken: true,
+        time_taken: action.data.time || nowTime, source: 'telegram'
+      }, { onConflict: 'date,vitamin_name' });
+      if (error) {
+        await sendTelegram(chatId, `Could not log vitamin: ${error.message}`);
         return res.status(200).send('OK');
       }
     }
@@ -919,6 +1024,16 @@ export default async function handler(req, res) {
         return res.status(200).send('OK');
       }
     }
+    if (action.type === 'add_routine' && action.data?.time && action.data?.activity) {
+      const { error } = await supabase.from('master_schedule').insert({
+        time: action.data.time, activity: action.data.activity,
+        color: action.data.color || '#7F77DD', active: true
+      });
+      if (error) {
+        await sendTelegram(chatId, `Could not add routine: ${error.message}`);
+        return res.status(200).send('OK');
+      }
+    }
     if (action.type === 'show_food') {
       const { data: foods } = await supabase.from('food_logs').select('*').eq('date', today).order('time');
       if (!foods?.length) {
@@ -926,6 +1041,26 @@ export default async function handler(req, res) {
       } else {
         const list = foods.map(f => `• ${f.time || ''} ${f.name}${f.portion ? ' (' + f.portion + ')' : ''}`).join('\n');
         await sendTelegram(chatId, `📋 *Johnson's food log today:*\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+    if (action.type === 'show_vitamins') {
+      const { data: vits } = await supabase.from('vitamin_logs').select('*').eq('date', today).eq('taken', true);
+      if (!vits?.length) {
+        await sendTelegram(chatId, "No vitamins logged for Johnson today!");
+      } else {
+        const list = vits.map(v => `- ${v.vitamin_name}${v.time_taken ? ' at ' + v.time_taken : ''}`).join('\n');
+        await sendTelegram(chatId, `Johnson's vitamins today:\n\n${list}`);
+      }
+      return res.status(200).send('OK');
+    }
+    if (action.type === 'show_routine') {
+      const { data: routine } = await supabase.from('master_schedule').select('*').eq('active', true).order('time');
+      if (!routine?.length) {
+        await sendTelegram(chatId, "No daily routine items set yet.");
+      } else {
+        const list = routine.map(r => `- ${r.time} - ${r.activity}`).join('\n');
+        await sendTelegram(chatId, `Johnson's daily routine:\n\n${list}`);
       }
       return res.status(200).send('OK');
     }

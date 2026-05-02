@@ -36,7 +36,45 @@ export default async function handler(req, res) {
     results.dashboard_tables = { error: e.message };
   }
 
-  // ── Telegram bot identity ────────────────────────────────────
+  // Core feature table checks
+  const featureTables = [
+    'food_logs',
+    'vitamins',
+    'vitamin_logs',
+    'activity_logs',
+    'schedule',
+    'master_schedule',
+    'master_schedule_log',
+    'reminders',
+    'context_reminders',
+    'johnson_preferences',
+    'johnson_profile',
+    'meal_plans',
+    'app_suggestions'
+  ];
+
+  results.feature_tables = {};
+  for (const table of featureTables) {
+    try {
+      const { count, error } = await supabase
+        .from(table)
+        .select('*', { count: 'exact', head: true });
+      results.feature_tables[table] = error ? `ERROR - ${error.message}` : `OK (${count ?? 0})`;
+    } catch (e) {
+      results.feature_tables[table] = `ERROR - ${e.message}`;
+    }
+  }
+
+  try {
+    const { error } = await supabase.from('master_schedule_log').select('activity').limit(1);
+    results.schema_checks = {
+      master_schedule_log_activity: error ? `MISSING - ${error.message}` : 'OK'
+    };
+  } catch (e) {
+    results.schema_checks = { master_schedule_log_activity: `ERROR - ${e.message}` };
+  }
+
+  // Telegram bot identity
   const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   const GROUP_ID  = process.env.TELEGRAM_GROUP_CHAT_ID;
 

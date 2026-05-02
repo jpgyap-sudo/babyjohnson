@@ -140,6 +140,7 @@ Configured in `vercel.json`. All times are UTC (app converts to PHT internally).
 | File | Contents |
 |---|---|
 | [`agents.md`](agents.md) | Full agent behavior, data tables, and interface reference |
-| [`workflow.md`](workflow.md) | All 5 system flows with diagrams |
+| [`feature.md`](feature.md) | Product feature map, acceptance criteria, readiness notes, and release checklist |
+| [`workflow.md`](workflow.md) | Testable workflows, debug paths, and smoke tests for all major app flows |
 | [`skills.md`](skills.md) | Every skill with triggers and examples |
 | [`.env.example`](.env.example) | Required environment variables |

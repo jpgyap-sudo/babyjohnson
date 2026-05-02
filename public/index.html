@@ -109,8 +109,20 @@ textarea{width:100%;min-height:64px;resize:vertical}
 .rec-item h3{font-size:14px;font-weight:500;margin-bottom:3px}
 .rec-item p{font-size:13px;color:#666;line-height:1.5}
 .rec-badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;margin-right:4px;margin-bottom:4px;font-weight:500}
+.feature-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.feature-tile{background:#f8f7f4;border-radius:8px;padding:.75rem}
+.feature-tile h3{font-size:13px;font-weight:600;margin-bottom:4px;color:#1a1a18}
+.feature-tile p{font-size:12px;color:#666;line-height:1.45}
+.guide-list{display:grid;gap:8px}
+.guide-step{display:flex;gap:10px;align-items:flex-start;padding:.65rem 0;border-bottom:.5px solid #eee}
+.guide-step:last-child{border-bottom:none}
+.guide-num{width:22px;height:22px;border-radius:50%;background:#EEEDFE;color:#3C3489;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.guide-copy h3{font-size:13px;font-weight:600;margin-bottom:2px}
+.guide-copy p{font-size:12px;color:#666;line-height:1.45}
+.quick-phrase{font-size:12px;background:#f8f7f4;border:.5px solid #e0ded6;border-radius:8px;padding:7px 9px;color:#444}
 .tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .loading{opacity:.5;pointer-events:none}
+@media(max-width:560px){.feature-grid{grid-template-columns:1fr}}
 /* Floating AI chat */
 .float-btn{position:fixed;bottom:22px;right:22px;width:52px;height:52px;border-radius:50%;background:#7F77DD;color:white;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(127,119,221,.45);z-index:200;display:flex;align-items:center;justify-content:center;transition:transform .15s}
 .float-btn:hover{transform:scale(1.08)}
@@ -146,6 +158,7 @@ textarea{width:100%;min-height:64px;resize:vertical}
     <button class="nav-btn" onclick="switchTab('prefs',this)">💛 Likes</button>
     <button class="nav-btn" onclick="switchTab('foodguide',this)">Food Guide</button>
     <button class="nav-btn" onclick="switchTab('recipes',this)">Recipes</button>
+    <button class="nav-btn" onclick="switchTab('features',this)">Product Guide</button>
     <button class="nav-btn" onclick="switchTab('insights',this)">💡 Insights</button>
   </div>
 
@@ -431,6 +444,64 @@ textarea{width:100%;min-height:64px;resize:vertical}
       <div class="rec-item"><h3>Egg &amp; veggie scramble</h3><p>Whisk 1 egg and cook with finely chopped spinach and soft tomato in olive oil. Serve with soft whole wheat toast fingers.</p></div>
       <div class="rec-item"><h3>Lentil soup</h3><p>Simmer red lentils with carrot, onion, and a pinch of turmeric until very soft. Blend smooth. High in iron and protein.</p></div>
       <div class="rec-item"><h3>Yogurt &amp; fruit bowl</h3><p>Full-fat plain yogurt with mashed ripe mango or banana. No sugar needed — naturally sweet and packed with calcium.</p></div>
+    </div>
+  </div>
+
+  <!-- PRODUCT GUIDE -->
+  <div id="tab-features" class="section">
+    <div class="card">
+      <div class="card-title">What this app does</div>
+      <div class="feature-grid">
+        <div class="feature-tile"><h3>Daily care log</h3><p>Track food, drinks, vitamins, activities, sleep, poop, notes, and one-time events.</p></div>
+        <div class="feature-tile"><h3>Telegram dashboard</h3><p>Use /dashboard in the family group for fast button-based logging with very little typing.</p></div>
+        <div class="feature-tile"><h3>Smart chat</h3><p>Type normal sentences in the AI tab or mention the bot in Telegram to log or ask questions.</p></div>
+        <div class="feature-tile"><h3>Passive logging</h3><p>The Telegram bot can notice care-related group messages and log them automatically.</p></div>
+        <div class="feature-tile"><h3>Routines and reminders</h3><p>Daily routines and time-based reminders can notify the Telegram group at the right time.</p></div>
+        <div class="feature-tile"><h3>Learning over time</h3><p>Confirmed likes, dislikes, weekly patterns, and care notes help personalize meal plans and insights.</p></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Best way to use it</div>
+      <div class="guide-list">
+        <div class="guide-step"><span class="guide-num">1</span><div class="guide-copy"><h3>Use buttons for busy moments</h3><p>In Telegram, send /dashboard, then tap Eating, Sleeping, Bath, Poop, Vitamins, Playing, Reading, or Note.</p></div></div>
+        <div class="guide-step"><span class="guide-num">2</span><div class="guide-copy"><h3>Type naturally when details matter</h3><p>Use the AI tab or mention the bot for messages like "Johnson ate banana rice chicken at lunch".</p></div></div>
+        <div class="guide-step"><span class="guide-num">3</span><div class="guide-copy"><h3>Use Schedule for today only</h3><p>Add doctor visits, errands, or special plans that should not repeat tomorrow.</p></div></div>
+        <div class="guide-step"><span class="guide-num">4</span><div class="guide-copy"><h3>Use Routine for repeating days</h3><p>Add daily bath, nap, meals, bedtime, school, or vitamin routines that should trigger reminders.</p></div></div>
+        <div class="guide-step"><span class="guide-num">5</span><div class="guide-copy"><h3>Confirm smart suggestions</h3><p>The bot should ask before saving likes, dislikes, context reminders, or app improvement requests.</p></div></div>
+        <div class="guide-step"><span class="guide-num">6</span><div class="guide-copy"><h3>Review Insights weekly</h3><p>Check what the bot learned from the last 7 days and mark app suggestions as implemented or dismissed.</p></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Quick phrases to try</div>
+      <div class="feature-grid">
+        <div class="quick-phrase">Johnson ate rice and chicken at 12:30</div>
+        <div class="quick-phrase">Gave him Vitamin C this morning</div>
+        <div class="quick-phrase">Johnson took a nap at 1pm</div>
+        <div class="quick-phrase">Add bath every day at 7pm</div>
+        <div class="quick-phrase">Remind me about vitamins at 8am</div>
+        <div class="quick-phrase">What did Johnson eat today?</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Caregiver rules</div>
+      <div class="rec-item"><h3>Keep replies short</h3><p>One clear confirmation is enough. Caregivers are busy.</p></div>
+      <div class="rec-item"><h3>Ask one question at a time</h3><p>If details are missing, the bot should ask the next small question only.</p></div>
+      <div class="rec-item"><h3>Use button tap time</h3><p>Dashboard logs should use when the caregiver tapped, not when they finished typing.</p></div>
+      <div class="rec-item"><h3>Ask before changing family rules</h3><p>Routine changes, context reminders, and preferences should be confirmed by a parent first.</p></div>
+      <div class="rec-item"><h3>Use Philippine time</h3><p>Daily logs, routines, reminders, and reports should use PHT.</p></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Testing and debugging</div>
+      <div class="feature-grid">
+        <div class="feature-tile"><h3>Health check</h3><p>Open /api/debug to check env vars, Supabase, dashboard tables, and Telegram sending.</p></div>
+        <div class="feature-tile"><h3>Reminder test</h3><p>Open /api/reminders?test=1 to test the first active routine reminder without waiting for the exact time.</p></div>
+        <div class="feature-tile"><h3>Smoke test</h3><p>Add one food, vitamin, activity, schedule item, routine, and reminder before each deploy.</p></div>
+        <div class="feature-tile"><h3>Schema check</h3><p>If routines or weekly analysis fail, verify master_schedule_log columns match the code.</p></div>
+      </div>
     </div>
   </div>
 

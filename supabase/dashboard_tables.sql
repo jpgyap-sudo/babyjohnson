@@ -83,11 +83,15 @@ create table if not exists master_schedule_log (
   id                uuid primary key default gen_random_uuid(),
   master_schedule_id uuid     not null references master_schedule(id) on delete cascade,
   date              text     not null,
+  activity          text,
   completed         boolean  default false,
   responded_at      timestamptz,
   created_at        timestamptz default now(),
   unique(master_schedule_id, date)
 );
+
+alter table master_schedule_log
+  add column if not exists activity text;
 
 create table if not exists reminders (
   id          uuid primary key default gen_random_uuid(),

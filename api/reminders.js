@@ -81,7 +81,6 @@ export default async function handler(req, res) {
     await supabase.from('master_schedule_log').insert({
       master_schedule_id: s.id,
       date: today,
-      activity: s.activity,
       completed: null
     });
   }

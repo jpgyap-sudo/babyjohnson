@@ -126,7 +126,7 @@ Rules:
         await supabase.from('master_schedule').insert({ time: a.data.time || '00:00', activity: a.data.activity, color: a.data.color || '#7F77DD', active: true });
         count++;
       } else if (a.type === 'add_schedule' && a.data?.activity) {
-        await supabase.from('schedule').insert({ time: a.data.time || '00:00', activity: a.data.activity, color: a.data.color || '#7F77DD', source: 'app' });
+        await supabase.from('schedule').insert({ date: today, time: a.data.time || '00:00', activity: a.data.activity, color: a.data.color || '#7F77DD', source: 'app' });
         count++;
       } else if (a.type === 'add_reminder' && a.data?.time && a.data?.message) {
         await supabase.from('reminders').insert({ time: a.data.time, message: a.data.message, active: true });
@@ -159,7 +159,7 @@ Rules:
 
   if (parsed.type === 'add_schedule' && parsed.data?.time && parsed.data?.activity) {
     await supabase.from('schedule').insert({
-      time: parsed.data.time, activity: parsed.data.activity,
+      date: today, time: parsed.data.time, activity: parsed.data.activity,
       color: parsed.data.color || '#7F77DD', source: 'app'
     });
   }
